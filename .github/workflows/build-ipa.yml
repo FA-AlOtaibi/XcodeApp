@@ -1,4 +1,4 @@
-name: Build DepthLight IPA
+name: Build DepthLight V4 Lite IPA
 
 on:
   push:
@@ -16,19 +16,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install build tools
-        run: |
-          brew install xcodegen
-          brew install huggingface-cli
-
-      - name: Download Apple Core ML depth model
-        run: |
-          mkdir -p Sources/Models
-          hf download apple/coreml-depth-anything-v2-small \
-            --include "DepthAnythingV2SmallF16.mlpackage/*" \
-            --local-dir Sources/Models
-          rm -rf Sources/Models/.cache
-          test -d Sources/Models/DepthAnythingV2SmallF16.mlpackage
+      - name: Install XcodeGen
+        run: brew install xcodegen
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -51,17 +40,18 @@ jobs:
         run: |
           APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "DepthLight.app" -print -quit)
           test -n "$APP_PATH"
+          rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/DepthLight.app
-          zip -qry DepthLight-CoreML-Metal-unsigned.ipa Payload
-          shasum -a 256 DepthLight-CoreML-Metal-unsigned.ipa > DepthLight-CoreML-Metal-unsigned.ipa.sha256
+          zip -qry DepthLight-V4-Lite-unsigned.ipa Payload
+          shasum -a 256 DepthLight-V4-Lite-unsigned.ipa > DepthLight-V4-Lite-unsigned.ipa.sha256
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DepthLight-CoreML-Metal-IPA
+          name: DepthLight-V4-Lite-IPA
           path: |
-            DepthLight-CoreML-Metal-unsigned.ipa
-            DepthLight-CoreML-Metal-unsigned.ipa.sha256
+            DepthLight-V4-Lite-unsigned.ipa
+            DepthLight-V4-Lite-unsigned.ipa.sha256
             build.log
           if-no-files-found: error
