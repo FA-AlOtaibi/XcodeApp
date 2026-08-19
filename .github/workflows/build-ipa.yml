@@ -27,6 +27,7 @@ jobs:
           hf download apple/coreml-depth-anything-v2-small \
             --include "DepthAnythingV2SmallF16.mlpackage/*" \
             --local-dir Sources/Models
+          rm -rf Sources/Models/.cache
           test -d Sources/Models/DepthAnythingV2SmallF16.mlpackage
 
       - name: Generate Xcode project
