@@ -15,16 +15,16 @@ targets:
     info:
       path: Sources/Info.plist
       properties:
-        CFBundleDisplayName: DepthLight
+        CFBundleDisplayName: "DepthLight V4"
         CFBundleExecutable: "$(EXECUTABLE_NAME)"
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
         CFBundleInfoDictionaryVersion: "6.0"
         CFBundleName: "$(PRODUCT_NAME)"
         CFBundlePackageType: APPL
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "4.0"
+        CFBundleVersion: "4"
         LSRequiresIPhoneOS: true
-        NSCameraUsageDescription: "DepthLight uses the camera to create real-time depth-aware lighting effects."
+        NSCameraUsageDescription: "DepthLight uses the TrueDepth camera for real-time face relighting and hand occlusion."
         NSPhotoLibraryAddUsageDescription: "DepthLight saves photos you capture to your photo library."
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
@@ -33,7 +33,7 @@ targets:
           - UIInterfaceOrientationPortrait
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.fahad.depthlight
+        PRODUCT_BUNDLE_IDENTIFIER: com.fahad.depthlightv4
         PRODUCT_NAME: DepthLight
         TARGETED_DEVICE_FAMILY: "1"
         DEVELOPMENT_TEAM: ""
