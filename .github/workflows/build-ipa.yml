@@ -24,11 +24,9 @@ jobs:
       - name: Download Apple Core ML depth model
         run: |
           mkdir -p Sources/Models
-          huggingface-cli download \
-            --local-dir Sources/Models \
-            --local-dir-use-symlinks False \
-            apple/coreml-depth-anything-v2-small \
-            --include "DepthAnythingV2SmallF16.mlpackage/*"
+          hf download apple/coreml-depth-anything-v2-small \
+            --include "DepthAnythingV2SmallF16.mlpackage/*" \
+            --local-dir Sources/Models
           test -d Sources/Models/DepthAnythingV2SmallF16.mlpackage
 
       - name: Generate Xcode project
