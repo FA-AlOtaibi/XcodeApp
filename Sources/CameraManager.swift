@@ -16,33 +16,37 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
     @Published var isRunning = false
     @Published var isFrontCamera = true
-    @Published var status = "جاري التجهيز…"
+    @Published var status = "جاهز"
     @Published var renderedImage: UIImage?
     @Published var modelReady = false
     @Published var fps: Double = 0
 
     private let sessionQueue = DispatchQueue(label: "DepthLight.Session")
     private let videoQueue = DispatchQueue(label: "DepthLight.Video", qos: .userInitiated)
+    private let modelQueue = DispatchQueue(label: "DepthLight.Model", qos: .utility)
     private let videoOutput = AVCaptureVideoDataOutput()
     private var input: AVCaptureDeviceInput?
-    private var engine: DepthEngine?
+
+    private let engineLock = NSLock()
+    private var _engine: DepthEngine?
+    private var engine: DepthEngine? {
+        engineLock.lock(); defer { engineLock.unlock() }
+        return _engine
+    }
+
     private var latestImage: UIImage?
-    private var processing = false
     private var lastFrameTime = CACurrentMediaTime()
+    private var lastInferenceTime: CFTimeInterval = 0
+    private let inferenceInterval: CFTimeInterval = 1.0 / 8.0
 
     private let settingsLock = NSLock()
     private var settings = LightingSettings()
 
     override init() {
         super.init()
-        do {
-            engine = try DepthEngine()
-            modelReady = true
-            status = "Core ML + Metal جاهز"
-        } catch {
-            modelReady = false
-            status = "تعذر تحميل نموذج العمق: \(error.localizedDescription)"
-        }
+        // Important: do not construct Core ML / Metal synchronously during app launch.
+        // The old version did this in init(), which could make iOS terminate the app
+        // before the first frame was shown on some devices/signing setups.
     }
 
     func requestAndStart() {
@@ -60,6 +64,34 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
         default:
             DispatchQueue.main.async { self.status = "فعّل إذن الكاميرا من الإعدادات" }
         }
+
+        loadEngineSafelyIfNeeded()
+    }
+
+    private func loadEngineSafelyIfNeeded() {
+        guard engine == nil, !modelReady else { return }
+        DispatchQueue.main.async { self.status = "الكاميرا تعمل — جاري تحميل Core ML…" }
+
+        modelQueue.async { [weak self] in
+            guard let self else { return }
+            autoreleasepool {
+                do {
+                    let newEngine = try DepthEngine()
+                    self.engineLock.lock()
+                    self._engine = newEngine
+                    self.engineLock.unlock()
+                    DispatchQueue.main.async {
+                        self.modelReady = true
+                        self.status = "Depth Anything V2 + Metal جاهز"
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.modelReady = false
+                        self.status = "وضع الكاميرا الآمن — Core ML: \(error.localizedDescription)"
+                    }
+                }
+            }
+        }
     }
 
     private func configureAndStart() {
@@ -74,7 +106,7 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                 self.input = nil
             }
 
-            if self.session.outputs.contains(self.videoOutput) == false {
+            if !self.session.outputs.contains(self.videoOutput) {
                 self.videoOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoOutput.videoSettings = [
                     kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -86,13 +118,17 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
             }
 
             let position: AVCaptureDevice.Position = self.isFrontCamera ? .front : .back
+            let deviceTypes: [AVCaptureDevice.DeviceType] = self.isFrontCamera
+                ? [.builtInTrueDepthCamera, .builtInWideAngleCamera]
+                : [.builtInWideAngleCamera, .builtInUltraWideCamera]
+
             let discovery = AVCaptureDevice.DiscoverySession(
-                deviceTypes: [.builtInTrueDepthCamera, .builtInWideAngleCamera, .builtInUltraWideCamera],
+                deviceTypes: deviceTypes,
                 mediaType: .video,
                 position: position
             )
 
-            guard let device = discovery.devices.first(where: { $0.position == position }),
+            guard let device = discovery.devices.first,
                   let newInput = try? AVCaptureDeviceInput(device: device),
                   self.session.canAddInput(newInput) else {
                 self.session.commitConfiguration()
@@ -119,16 +155,14 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
 
             DispatchQueue.main.async {
                 self.isRunning = true
-                self.status = self.modelReady ? "Depth Anything V2 + Metal يعمل" : self.status
+                if self.modelReady { self.status = "Depth Anything V2 + Metal يعمل" }
             }
         }
     }
 
     func switchCamera() {
-        DispatchQueue.main.async {
-            self.isFrontCamera.toggle()
-            self.configureAndStart()
-        }
+        isFrontCamera.toggle()
+        configureAndStart()
     }
 
     func updateLight(position: CGPoint? = nil,
@@ -160,41 +194,47 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
-        guard !processing,
-              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        processing = true
+        let now = CACurrentMediaTime()
+        let currentEngine = engine
+
+        // Until the model is ready, show the camera immediately. Once ready,
+        // throttle expensive depth inference to ~8 FPS to avoid jetsam/watchdog exits.
+        if currentEngine != nil, now - lastInferenceTime < inferenceInterval {
+            return
+        }
+        if currentEngine != nil { lastInferenceTime = now }
+
         settingsLock.lock()
         let currentSettings = settings
         settingsLock.unlock()
 
         autoreleasepool {
             let image: UIImage?
-            if let engine {
-                image = engine.process(pixelBuffer: pixelBuffer, settings: currentSettings)
+            if let currentEngine {
+                image = currentEngine.process(pixelBuffer: pixelBuffer, settings: currentSettings)
             } else {
                 image = UIImage(pixelBuffer: pixelBuffer)
             }
 
-            if let image {
-                latestImage = image
-                let now = CACurrentMediaTime()
-                let currentFPS = 1.0 / max(now - lastFrameTime, 0.001)
-                lastFrameTime = now
-                DispatchQueue.main.async {
-                    self.renderedImage = image
-                    self.fps = self.fps == 0 ? currentFPS : (self.fps * 0.85 + currentFPS * 0.15)
-                }
+            guard let image else { return }
+            latestImage = image
+            let currentFPS = 1.0 / max(now - lastFrameTime, 0.001)
+            lastFrameTime = now
+
+            DispatchQueue.main.async {
+                self.renderedImage = image
+                self.fps = self.fps == 0 ? currentFPS : (self.fps * 0.85 + currentFPS * 0.15)
             }
         }
-        processing = false
     }
 }
 
 private extension UIImage {
     convenience init?(pixelBuffer: CVPixelBuffer) {
         let ci = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext(options: nil)
+        let context = CIContext(options: [.cacheIntermediates: false])
         guard let cg = context.createCGImage(ci, from: ci.extent) else { return nil }
         self.init(cgImage: cg)
     }
