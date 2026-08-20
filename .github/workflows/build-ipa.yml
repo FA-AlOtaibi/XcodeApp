@@ -1,4 +1,4 @@
-name: Build DepthLight V6 Pro IPA
+name: Build DepthLight V8 IPA
 
 on:
   push:
@@ -63,15 +63,15 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           ditto "$APP_PATH" Payload/DepthLight.app
-          /usr/bin/zip -qry DepthLight-V6-Pro-Resignable.ipa Payload
-          shasum -a 256 DepthLight-V6-Pro-Resignable.ipa > DepthLight-V6-Pro-Resignable.ipa.sha256
+          /usr/bin/zip -qry DepthLight-V8-Resignable.ipa Payload
+          shasum -a 256 DepthLight-V8-Resignable.ipa > DepthLight-V8-Resignable.ipa.sha256
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DepthLight-V6-Pro-Resignable-IPA
+          name: DepthLight-V8-Resignable-IPA
           path: |
-            DepthLight-V6-Pro-Resignable.ipa
-            DepthLight-V6-Pro-Resignable.ipa.sha256
+            DepthLight-V8-Resignable.ipa
+            DepthLight-V8-Resignable.ipa.sha256
             build.log
           if-no-files-found: error
