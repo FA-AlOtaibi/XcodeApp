@@ -1,4 +1,4 @@
-name: Build DepthLight IPA
+name: Build DepthLight V6 Pro IPA
 
 on:
   push:
@@ -33,7 +33,7 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build unsigned iPhone app
+      - name: Build iPhone app
         run: |
           set -o pipefail
           xcodebuild \
@@ -47,21 +47,31 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build | tee build.log
 
-      - name: Package IPA
+      - name: Prepare re-signable app bundle
         run: |
           APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "DepthLight.app" -print -quit)
           test -n "$APP_PATH"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$APP_PATH/Info.plist"
+          test -x "$APP_PATH/DepthLight"
+          codesign --force --sign - --timestamp=none "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "DepthLight.app" -print -quit)
+          rm -rf Payload
           mkdir -p Payload
-          cp -R "$APP_PATH" Payload/DepthLight.app
-          zip -qry DepthLight-CoreML-Metal-unsigned.ipa Payload
-          shasum -a 256 DepthLight-CoreML-Metal-unsigned.ipa > DepthLight-CoreML-Metal-unsigned.ipa.sha256
+          ditto "$APP_PATH" Payload/DepthLight.app
+          /usr/bin/zip -qry DepthLight-V6-Pro-Resignable.ipa Payload
+          shasum -a 256 DepthLight-V6-Pro-Resignable.ipa > DepthLight-V6-Pro-Resignable.ipa.sha256
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DepthLight-CoreML-Metal-IPA
+          name: DepthLight-V6-Pro-Resignable-IPA
           path: |
-            DepthLight-CoreML-Metal-unsigned.ipa
-            DepthLight-CoreML-Metal-unsigned.ipa.sha256
+            DepthLight-V6-Pro-Resignable.ipa
+            DepthLight-V6-Pro-Resignable.ipa.sha256
             build.log
           if-no-files-found: error
