@@ -2,23 +2,23 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
-    @State private var lightPosition = CGPoint(x: 0.74, y: 0.50)
-    @State private var intensity = 0.88
-    @State private var radius = 0.44
-    @State private var depthStrength = 0.92
+    @State private var lightPosition = CGPoint(x: 0.72, y: 0.50)
+    @State private var intensity = 0.92
+    @State private var radius = 0.40
+    @State private var depthStrength = 0.90
     @State private var lightColor: Color = Color(red: 1.0, green: 0.82, blue: 0.60)
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 header
                 preview
                 controls
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 14)
+            .padding(.bottom, 12)
         }
         .onAppear {
             camera.requestAndStart()
@@ -27,19 +27,20 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("DepthLight V5")
+                Text("DepthLight V6 Pro")
                     .font(.headline.bold())
-                Text(camera.modelReady ? "Depth-field relighting + occlusion" : camera.status)
+                Text(camera.status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
             Button(action: camera.switchCamera) {
-                Image(systemName: "arrow.triangle.2.circlepath.camera")
+                Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
                     .font(.title3)
-                    .frame(width: 42, height: 42)
+                    .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .foregroundStyle(.white)
@@ -50,7 +51,7 @@ struct ContentView: View {
     private var preview: some View {
         GeometryReader { geo in
             ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .fill(Color.white.opacity(0.04))
 
                 if let image = camera.renderedImage {
@@ -61,74 +62,76 @@ struct ContentView: View {
                         .clipped()
                 } else {
                     VStack(spacing: 12) {
-                        ProgressView()
+                        ProgressView().controlSize(.large)
                         Text(camera.status)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         lightPosition = CGPoint(
-                            x: min(max(value.location.x / max(geo.size.width, 1), 0.02), 0.98),
-                            y: min(max(value.location.y / max(geo.size.height, 1), 0.02), 0.98)
+                            x: min(max(value.location.x / max(geo.size.width, 1), 0.03), 0.97),
+                            y: min(max(value.location.y / max(geo.size.height, 1), 0.03), 0.97)
                         )
                         camera.updateLight(position: lightPosition)
                     }
             )
             .overlay(alignment: .topLeading) {
-                HStack(spacing: 8) {
-                    badge(camera.modelReady ? "DEPTH" : "RGB", active: camera.modelReady)
+                HStack(spacing: 7) {
+                    badge(camera.depthMode, active: camera.modelReady)
                     badge("\(Int(camera.fps.rounded())) FPS", active: camera.isRunning)
                 }
                 .padding(10)
             }
+            .overlay(alignment: .bottomLeading) {
+                if camera.depthMode == "TRUEDEPTH" {
+                    Label("Hardware depth • hand occlusion", systemImage: "cube.transparent.fill")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(10)
+                }
+            }
         }
+        .aspectRatio(9.0 / 16.0, contentMode: .fit)
         .frame(maxHeight: .infinity)
-        .frame(minHeight: 430)
     }
 
     private var controls: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("القوة", systemImage: "sun.max.fill")
-                        .font(.caption.bold())
-                    Slider(value: $intensity, in: 0.05...1.0)
-                        .onChange(of: intensity) { value in
-                            camera.updateLight(intensity: Float(value))
-                        }
+        VStack(spacing: 9) {
+            HStack(spacing: 12) {
+                control(title: "القوة", icon: "sun.max.fill") {
+                    Slider(value: $intensity, in: 0.10...1.0)
+                        .onChange(of: intensity) { value in camera.updateLight(intensity: Float(value)) }
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("الحجم", systemImage: "circle.dotted")
-                        .font(.caption.bold())
-                    Slider(value: $radius, in: 0.18...0.72)
-                        .onChange(of: radius) { value in
-                            camera.updateLight(radius: Float(value))
-                        }
+                control(title: "الحجم", icon: "circle.dotted") {
+                    Slider(value: $radius, in: 0.16...0.68)
+                        .onChange(of: radius) { value in camera.updateLight(radius: Float(value)) }
                 }
             }
 
             HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("الظل / الحجب", systemImage: "circle.lefthalf.filled")
-                        .font(.caption.bold())
+                control(title: "الظل / الحجب", icon: "circle.lefthalf.filled") {
                     Slider(value: $depthStrength, in: 0...1)
-                        .onChange(of: depthStrength) { value in
-                            camera.updateLight(depthStrength: Float(value))
-                        }
+                        .onChange(of: depthStrength) { value in camera.updateLight(depthStrength: Float(value)) }
                 }
 
                 ColorPicker("لون", selection: $lightColor, supportsOpacity: false)
                     .labelsHidden()
-                    .onChange(of: lightColor) { value in
-                        camera.updateLight(color: rgb(value))
-                    }
+                    .onChange(of: lightColor) { value in camera.updateLight(color: rgb(value)) }
+                    .frame(width: 48)
+            }
+
+            HStack(spacing: 10) {
+                preset("ناعم", intensity: 0.62, radius: 0.50, shadow: 0.70)
+                preset("واقعي", intensity: 0.86, radius: 0.40, shadow: 0.90)
+                preset("سينمائي", intensity: 1.0, radius: 0.31, shadow: 1.0)
             }
 
             Button(action: camera.capture) {
@@ -136,12 +139,34 @@ struct ContentView: View {
                     .font(.subheadline.bold())
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(.plain)
         }
         .padding(12)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18))
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 19))
+    }
+
+    private func control<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: icon).font(.caption.bold())
+            content()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func preset(_ title: String, intensity: Double, radius: Double, shadow: Double) -> some View {
+        Button(title) {
+            self.intensity = intensity
+            self.radius = radius
+            self.depthStrength = shadow
+            camera.updateLight(intensity: Float(intensity), radius: Float(radius), depthStrength: Float(shadow))
+        }
+        .font(.caption.bold())
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 7)
+        .background(Color.white.opacity(0.07), in: Capsule())
+        .buttonStyle(.plain)
     }
 
     private func badge(_ text: String, active: Bool) -> some View {
@@ -154,21 +179,16 @@ struct ContentView: View {
     }
 
     private func pushSettings() {
-        camera.updateLight(
-            position: lightPosition,
-            intensity: Float(intensity),
-            radius: Float(radius),
-            depthStrength: Float(depthStrength),
-            color: rgb(lightColor)
-        )
+        camera.updateLight(position: lightPosition,
+                           intensity: Float(intensity),
+                           radius: Float(radius),
+                           depthStrength: Float(depthStrength),
+                           color: rgb(lightColor))
     }
 
     private func rgb(_ color: Color) -> SIMD3<Float> {
         let ui = UIColor(color)
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var a: CGFloat = 0
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         ui.getRed(&r, green: &g, blue: &b, alpha: &a)
         return SIMD3<Float>(Float(r), Float(g), Float(b))
     }
