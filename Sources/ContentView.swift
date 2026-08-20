@@ -2,16 +2,15 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var camera = CameraManager()
-    @State private var lightPosition = CGPoint(x: 0.72, y: 0.50)
-    @State private var intensity = 0.92
-    @State private var radius = 0.40
-    @State private var depthStrength = 0.90
+    @State private var lightPosition = CGPoint(x: 0.72, y: 0.48)
+    @State private var intensity = 0.58
+    @State private var radius = 0.30
+    @State private var depthStrength = 0.62
     @State private var lightColor: Color = Color(red: 1.0, green: 0.82, blue: 0.60)
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-
             VStack(spacing: 10) {
                 header
                 preview
@@ -29,7 +28,7 @@ struct ContentView: View {
     private var header: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("DepthLight V6 Pro")
+                Text("DepthLight V7")
                     .font(.headline.bold())
                 Text(camera.status)
                     .font(.caption)
@@ -53,7 +52,6 @@ struct ContentView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .fill(Color.white.opacity(0.04))
-
                 if let image = camera.renderedImage {
                     Image(uiImage: image)
                         .resizable()
@@ -88,16 +86,6 @@ struct ContentView: View {
                 }
                 .padding(10)
             }
-            .overlay(alignment: .bottomLeading) {
-                if camera.depthMode == "TRUEDEPTH" {
-                    Label("Hardware depth • hand occlusion", systemImage: "cube.transparent.fill")
-                        .font(.caption2.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .padding(10)
-                }
-            }
         }
         .aspectRatio(9.0 / 16.0, contentMode: .fit)
         .frame(maxHeight: .infinity)
@@ -107,21 +95,20 @@ struct ContentView: View {
         VStack(spacing: 9) {
             HStack(spacing: 12) {
                 control(title: "القوة", icon: "sun.max.fill") {
-                    Slider(value: $intensity, in: 0.10...1.0)
+                    Slider(value: $intensity, in: 0.08...0.85)
                         .onChange(of: intensity) { value in camera.updateLight(intensity: Float(value)) }
                 }
                 control(title: "الحجم", icon: "circle.dotted") {
-                    Slider(value: $radius, in: 0.16...0.68)
+                    Slider(value: $radius, in: 0.12...0.55)
                         .onChange(of: radius) { value in camera.updateLight(radius: Float(value)) }
                 }
             }
 
             HStack(spacing: 12) {
                 control(title: "الظل / الحجب", icon: "circle.lefthalf.filled") {
-                    Slider(value: $depthStrength, in: 0...1)
+                    Slider(value: $depthStrength, in: 0...0.85)
                         .onChange(of: depthStrength) { value in camera.updateLight(depthStrength: Float(value)) }
                 }
-
                 ColorPicker("لون", selection: $lightColor, supportsOpacity: false)
                     .labelsHidden()
                     .onChange(of: lightColor) { value in camera.updateLight(color: rgb(value)) }
@@ -129,9 +116,9 @@ struct ContentView: View {
             }
 
             HStack(spacing: 10) {
-                preset("ناعم", intensity: 0.62, radius: 0.50, shadow: 0.70)
-                preset("واقعي", intensity: 0.86, radius: 0.40, shadow: 0.90)
-                preset("سينمائي", intensity: 1.0, radius: 0.31, shadow: 1.0)
+                preset("طبيعي", intensity: 0.46, radius: 0.34, shadow: 0.48)
+                preset("واقعي", intensity: 0.58, radius: 0.30, shadow: 0.62)
+                preset("درامي", intensity: 0.72, radius: 0.24, shadow: 0.78)
             }
 
             Button(action: camera.capture) {
