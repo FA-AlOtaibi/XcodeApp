@@ -1,0 +1,48 @@
+name: Build Hammel IPA
+on:
+  push:
+    branches: [hammel-ipa-build]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: HammelBuild
+        run: xcodegen generate
+      - name: Build unsigned device app
+        working-directory: HammelBuild
+        run: |
+          rm -rf build
+          xcodebuild \
+            -project Hammel.xcodeproj \
+            -scheme Hammel \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            CONFIGURATION_BUILD_DIR="$PWD/build" \
+            clean build
+      - name: Package IPA
+        working-directory: HammelBuild
+        run: |
+          test -d build/Hammel.app
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/Hammel.app Payload/Hammel.app
+          /usr/bin/zip -qry Hammel-unsigned.ipa Payload
+          ls -lh Hammel-unsigned.ipa
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hammel-unsigned-IPA
+          path: HammelBuild/Hammel-unsigned.ipa
+          if-no-files-found: error
