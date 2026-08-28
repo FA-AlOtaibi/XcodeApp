@@ -20,5 +20,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "حمّل"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "يحتاج حمّل إلى إذن لإضافة الفيديوهات والصور التي تختار حفظها إلى مكتبة الصور."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "يستخدم حمّل مكتبة الصور فقط عند اختيار حفظ أو مشاركة الوسائط."
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
