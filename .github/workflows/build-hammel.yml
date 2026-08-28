@@ -46,3 +46,4 @@ jobs:
           name: Hammel-unsigned-IPA
           path: HammelBuild/Hammel-unsigned.ipa
           if-no-files-found: error
+# v0.4 dynamic engine failover
