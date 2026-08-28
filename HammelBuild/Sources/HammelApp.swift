@@ -6,18 +6,21 @@ import AVFoundation
 
 @main
 struct HammelApp: App {
-    var body: some Scene {
-        WindowGroup { RootView().environment(\.layoutDirection, .rightToLeft) }
-    }
+    var body: some Scene { WindowGroup { RootView().environment(\.layoutDirection, .rightToLeft) } }
 }
 
 enum PlatformKind: String { case tiktok = "TikTok", youtube = "YouTube", x = "X", instagram = "Instagram", facebook = "Facebook", generic = "Web" }
 enum SaveTarget: String, CaseIterable, Identifiable { case app = "داخل التطبيق", photos = "الصور", ask = "اسألني كل مرة"; var id: String { rawValue } }
-
 enum AppError: Error { case message(String); var text: String { if case let .message(v) = self { return v }; return "حدث خطأ." } }
 
 struct DownloadMedia: Identifiable, Hashable {
-    let id = UUID(); let url: URL; let filename: String; let type: String; let thumb: URL?; let referer: String?; let platform: PlatformKind
+    let id = UUID()
+    let url: URL
+    let filename: String
+    let type: String
+    let thumb: URL?
+    let referer: String?
+    let platform: PlatformKind
 }
 struct LocalMedia: Identifiable, Hashable { let id = UUID(); let url: URL; let createdAt: Date }
 
@@ -30,8 +33,9 @@ final class AppModel: ObservableObject {
     @Published var library: [LocalMedia] = []
     @Published var activeEngine = "جاهز"
     @Published var detectedPlatform = "تلقائي"
-    @Published var saveTarget: SaveTarget = SaveTarget(rawValue: UserDefaults.standard.string(forKey: "saveTarget") ?? "") ?? .app
     @Published var lastSavedToPhotos = false
+    @Published var saveTarget: SaveTarget = SaveTarget(rawValue: UserDefaults.standard.string(forKey: "saveTarget") ?? "") ?? .app
+
     private let ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"
 
     init() { refreshLibrary() }
@@ -39,28 +43,28 @@ final class AppModel: ObservableObject {
 
     func resolve() async {
         let raw = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let source = URL(string: raw), source.scheme?.hasPrefix("http") == true else { error = "الصق رابطًا صحيحًا."; return }
-        isLoading = true; error = nil; results = []; defer { isLoading = false }
+        guard let source = URL(string: raw), source.scheme?.hasPrefix("http") == true else { self.error = "الصق رابطًا صحيحًا."; return }
+        isLoading = true; self.error = nil; results = []
         let p = detect(source); detectedPlatform = p.rawValue; activeEngine = "جاري التحليل…"
+        defer { isLoading = false }
         do {
             let media: [DownloadMedia]
             switch p {
             case .tiktok: media = try await resolveTikTok(source); activeEngine = "TikTok مباشر"
             case .youtube: media = try await resolveYouTube(source); activeEngine = "YouTube"
             case .x: media = try await resolveX(source); activeEngine = "X مباشر"
-            case .instagram: media = try await resolveMeta(source, p); activeEngine = "Instagram"
-            case .facebook: media = try await resolveMeta(source, p); activeEngine = "Facebook"
-            case .generic: media = try await resolveMeta(source, p); activeEngine = "Web"
+            case .instagram: media = try await resolveMeta(source, .instagram); activeEngine = "Instagram"
+            case .facebook: media = try await resolveMeta(source, .facebook); activeEngine = "Facebook"
+            case .generic: media = try await resolveMeta(source, .generic); activeEngine = "Web"
             }
             guard !media.isEmpty else { throw AppError.message("لم أجد وسائط قابلة للتنزيل.") }
             results = media
-        } catch { error = readable(error); activeEngine = "تعذر الجلب" }
+        } catch let caught { self.error = readable(caught); activeEngine = "تعذر الجلب" }
     }
 
     func download(_ item: DownloadMedia, target: SaveTarget? = nil) async {
-        let t = target ?? saveTarget
-        if t == .ask { return }
-        isLoading = true; error = nil; lastSavedToPhotos = false; defer { isLoading = false }
+        let t = target ?? saveTarget; if t == .ask { return }
+        isLoading = true; self.error = nil; lastSavedToPhotos = false; defer { isLoading = false }
         do {
             var req = URLRequest(url: item.url); req.timeoutInterval = 120; req.setValue(ua, forHTTPHeaderField: "User-Agent"); if let r = item.referer { req.setValue(r, forHTTPHeaderField: "Referer") }
             let (tmp, response) = try await URLSession.shared.download(for: req)
@@ -68,31 +72,42 @@ final class AppModel: ObservableObject {
             let saved = try persist(tmp, item.filename)
             if t == .photos { try await saveToPhotos(saved); lastSavedToPhotos = true }
             refreshLibrary()
-        } catch { error = readable(error) }
+        } catch let caught { self.error = readable(caught) }
     }
 
-    func saveExistingToPhotos(_ url: URL) async { do { try await saveToPhotos(url); lastSavedToPhotos = true } catch { error = readable(error) } }
+    func saveExistingToPhotos(_ url: URL) async {
+        do { try await saveToPhotos(url); lastSavedToPhotos = true }
+        catch let caught { self.error = readable(caught) }
+    }
     func deleteLocal(_ item: LocalMedia) { try? FileManager.default.removeItem(at: item.url); refreshLibrary() }
-
     func refreshLibrary() {
-        let folder = mediaFolder(); try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let urls = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])) ?? []
-        library = urls.filter { !$0.hasDirectoryPath }.map { u in LocalMedia(url: u, createdAt: (try? u.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast) }.sorted { $0.createdAt > $1.createdAt }
+        let f = mediaFolder(); try? FileManager.default.createDirectory(at: f, withIntermediateDirectories: true)
+        let urls = (try? FileManager.default.contentsOfDirectory(at: f, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        library = urls.filter { !$0.hasDirectoryPath }.map { LocalMedia(url: $0, createdAt: (try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast) }.sorted { $0.createdAt > $1.createdAt }
     }
 
     private func detect(_ u: URL) -> PlatformKind {
-        let h = (u.host ?? "").lowercased(); if h.contains("tiktok") { return .tiktok }; if h.contains("youtube") || h.contains("youtu.be") { return .youtube }; if h == "x.com" || h.contains("twitter.com") { return .x }; if h.contains("instagram") { return .instagram }; if h.contains("facebook") || h.contains("fb.watch") { return .facebook }; return .generic
+        let h = (u.host ?? "").lowercased()
+        if h.contains("tiktok") { return .tiktok }
+        if h.contains("youtube") || h.contains("youtu.be") { return .youtube }
+        if h == "x.com" || h.contains("twitter.com") { return .x }
+        if h.contains("instagram") { return .instagram }
+        if h.contains("facebook") || h.contains("fb.watch") { return .facebook }
+        return .generic
     }
 
     private func resolveTikTok(_ source: URL) async throws -> [DownloadMedia] {
         let (html, final) = try await fetchHTML(source, "https://www.tiktok.com/")
         for p in [#"<script[^>]*id=[\"']__UNIVERSAL_DATA_FOR_REHYDRATION__[\"'][^>]*>(.*?)</script>"#, #"<script[^>]*id=[\"']SIGI_STATE[\"'][^>]*>(.*?)</script>"#] {
             if let raw = regexFirst(html, p), let d = raw.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d), let play = firstURL(in: obj, keys: ["playAddr","playAddrH264"]), let u = URL(string: play) {
-                let cover = firstURL(in: obj, keys: ["cover","originCover"]).flatMap(URL.init(string:)); let id = firstString(in: obj, keys: ["id","itemId"]) ?? UUID().uuidString
+                let cover = firstURL(in: obj, keys: ["cover","originCover"]).flatMap(URL.init(string:))
+                let id = firstString(in: obj, keys: ["id","itemId"]) ?? UUID().uuidString
                 return [DownloadMedia(url: u, filename: "tiktok-\(id).mp4", type: "video", thumb: cover, referer: "https://www.tiktok.com/", platform: .tiktok)]
             }
         }
-        if let raw = regexFirst(html, #"\"playAddr\"\s*:\s*\"([^\"]+)\""#), let u = URL(string: decodeEscapedURL(raw)) { return [DownloadMedia(url: u, filename: "tiktok-video.mp4", type: "video", thumb: nil, referer: final.absoluteString, platform: .tiktok)] }
+        if let raw = regexFirst(html, #"\"playAddr\"\s*:\s*\"([^\"]+)\""#), let u = URL(string: decodeEscapedURL(raw)) {
+            return [DownloadMedia(url: u, filename: "tiktok-video.mp4", type: "video", thumb: nil, referer: final.absoluteString, platform: .tiktok)]
+        }
         throw AppError.message("تعذر استخراج فيديو TikTok.")
     }
 
@@ -108,23 +123,34 @@ final class AppModel: ObservableObject {
         guard let text = extractJSONObject(after: "ytInitialPlayerResponse =", in: html), let d = text.data(using: .utf8), let j = try JSONSerialization.jsonObject(with: d) as? [String: Any] else { throw AppError.message("تعذر قراءة YouTube.") }
         if let p = j["playabilityStatus"] as? [String: Any], let s = p["status"] as? String, s != "OK" { throw AppError.message((p["reason"] as? String) ?? s) }
         guard let stream = j["streamingData"] as? [String: Any] else { return [] }
-        let details = j["videoDetails"] as? [String: Any]; let title = sanitize((details?["title"] as? String) ?? "youtube-\(id)")
+        let details = j["videoDetails"] as? [String: Any]
+        let title = sanitize((details?["title"] as? String) ?? "youtube-\(id)")
         let thumb = ((details?["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]])?.compactMap { ($0["url"] as? String).flatMap(URL.init(string:)) }.last
-        let formats = (stream["formats"] as? [[String: Any]] ?? []).compactMap { f -> (URL, Int, String)? in guard let s = f["url"] as? String, let u = URL(string: s) else { return nil }; return (u, f["height"] as? Int ?? 0, f["qualityLabel"] as? String ?? "video") }.sorted { $0.1 > $1.1 }
+        let formats = (stream["formats"] as? [[String: Any]] ?? []).compactMap { f -> (URL, Int, String)? in
+            guard let s = f["url"] as? String, let u = URL(string: s) else { return nil }
+            return (u, f["height"] as? Int ?? 0, f["qualityLabel"] as? String ?? "video")
+        }.sorted { $0.1 > $1.1 }
         guard let best = formats.first else { return [] }
         return [DownloadMedia(url: best.0, filename: "\(title)-\(best.2).mp4", type: "video", thumb: thumb, referer: "https://www.youtube.com/", platform: .youtube)]
     }
 
     private func youtubeInvidious(_ id: String) async throws -> [DownloadMedia] {
-        let list = URL(string: "https://api.invidious.io/instances.json?sort_by=health")!; let (d, _) = try await URLSession.shared.data(from: list)
+        let list = URL(string: "https://api.invidious.io/instances.json?sort_by=health")!
+        let (d, _) = try await URLSession.shared.data(from: list)
         guard let rows = try JSONSerialization.jsonObject(with: d) as? [[Any]] else { throw AppError.message("لا يوجد محرك YouTube متاح الآن.") }
         for row in rows.prefix(20) {
             guard row.count > 1, let meta = row[1] as? [String: Any], (meta["api"] as? Bool) == true, let uri = meta["uri"] as? String, let endpoint = URL(string: "\(uri)/api/v1/videos/\(id)") else { continue }
             do {
                 var req = URLRequest(url: endpoint); req.timeoutInterval = 10; req.setValue(ua, forHTTPHeaderField: "User-Agent")
-                let (data, response) = try await URLSession.shared.data(for: req); guard let h = response as? HTTPURLResponse, (200..<300).contains(h.statusCode), let j = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-                let title = sanitize((j["title"] as? String) ?? "youtube-\(id)"); let thumb = (j["videoThumbnails"] as? [[String: Any]])?.compactMap { ($0["url"] as? String).flatMap(URL.init(string:)) }.last
-                let fs = (j["formatStreams"] as? [[String: Any]] ?? []).compactMap { f -> (URL, Int, String)? in guard let s = f["url"] as? String, let u = URL(string: s) else { return nil }; let q = f["qualityLabel"] as? String ?? f["quality"] as? String ?? "video"; return (u, Int(q.filter(\.isNumber)) ?? 0, q) }.sorted { $0.1 > $1.1 }
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let h = response as? HTTPURLResponse, (200..<300).contains(h.statusCode), let j = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                let title = sanitize((j["title"] as? String) ?? "youtube-\(id)")
+                let thumb = (j["videoThumbnails"] as? [[String: Any]])?.compactMap { ($0["url"] as? String).flatMap(URL.init(string:)) }.last
+                let fs = (j["formatStreams"] as? [[String: Any]] ?? []).compactMap { f -> (URL, Int, String)? in
+                    guard let s = f["url"] as? String, let u = URL(string: s) else { return nil }
+                    let q = f["qualityLabel"] as? String ?? f["quality"] as? String ?? "video"
+                    return (u, Int(q.filter(\.isNumber)) ?? 0, q)
+                }.sorted { $0.1 > $1.1 }
                 if let best = fs.first { return [DownloadMedia(url: best.0, filename: "\(title)-\(best.2).mp4", type: "video", thumb: thumb, referer: "https://www.youtube.com/", platform: .youtube)] }
             } catch { continue }
         }
@@ -134,19 +160,28 @@ final class AppModel: ObservableObject {
     private func youtubeID(_ u: URL) -> String? {
         if (u.host ?? "").contains("youtu.be") { return u.pathComponents.dropFirst().first }
         if let c = URLComponents(url: u, resolvingAgainstBaseURL: false), let v = c.queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty { return v }
-        let a = u.pathComponents; if let i = a.firstIndex(where: { $0 == "shorts" || $0 == "embed" || $0 == "live" }), i + 1 < a.count { return a[i+1] }; return nil
+        let a = u.pathComponents
+        if let i = a.firstIndex(where: { $0 == "shorts" || $0 == "embed" || $0 == "live" }), i + 1 < a.count { return a[i+1] }
+        return nil
     }
 
     private func resolveX(_ source: URL) async throws -> [DownloadMedia] {
         guard let sid = source.pathComponents.first(where: { $0.count > 8 && $0.allSatisfy(\.isNumber) }) else { throw AppError.message("لم أتعرف على منشور X.") }
-        let comps = source.pathComponents; let user = comps.count > 1 ? comps[1] : "i"; let endpoint = URL(string: "https://api.fxtwitter.com/\(user)/status/\(sid)")!
-        let (d, r) = try await URLSession.shared.data(from: endpoint); guard let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode), let j = try JSONSerialization.jsonObject(with: d) as? [String: Any] else { throw URLError(.badServerResponse) }
-        let tweet = (j["tweet"] as? [String: Any]) ?? j; var out: [DownloadMedia] = []
+        let comps = source.pathComponents, user = comps.count > 1 ? comps[1] : "i"
+        let endpoint = URL(string: "https://api.fxtwitter.com/\(user)/status/\(sid)")!
+        let (d, r) = try await URLSession.shared.data(from: endpoint)
+        guard let h = r as? HTTPURLResponse, (200..<300).contains(h.statusCode), let j = try JSONSerialization.jsonObject(with: d) as? [String: Any] else { throw URLError(.badServerResponse) }
+        let tweet = (j["tweet"] as? [String: Any]) ?? j
+        var out: [DownloadMedia] = []
         if let media = tweet["media"] as? [String: Any] {
-            for (i, v) in (media["videos"] as? [[String: Any]] ?? []).enumerated() { let vars = (v["variants"] as? [[String: Any]] ?? []).compactMap { x -> (URL, Int)? in guard let s = x["url"] as? String, s.contains(".mp4"), let u = URL(string: s) else { return nil }; return (u, x["bitrate"] as? Int ?? 0) }; if let best = vars.max(by: { $0.1 < $1.1 }) { out.append(DownloadMedia(url: best.0, filename: "x-\(sid)-\(i+1).mp4", type: "video", thumb: nil, referer: source.absoluteString, platform: .x)) } }
+            for (i, v) in (media["videos"] as? [[String: Any]] ?? []).enumerated() {
+                let vars = (v["variants"] as? [[String: Any]] ?? []).compactMap { x -> (URL, Int)? in guard let s = x["url"] as? String, s.contains(".mp4"), let u = URL(string: s) else { return nil }; return (u, x["bitrate"] as? Int ?? 0) }
+                if let best = vars.max(by: { $0.1 < $1.1 }) { out.append(DownloadMedia(url: best.0, filename: "x-\(sid)-\(i+1).mp4", type: "video", thumb: nil, referer: source.absoluteString, platform: .x)) }
+            }
             for (i, p) in (media["photos"] as? [[String: Any]] ?? []).enumerated() { if let s = p["url"] as? String, let u = URL(string: s) { out.append(DownloadMedia(url: u, filename: "x-\(sid)-\(i+1).jpg", type: "photo", thumb: u, referer: source.absoluteString, platform: .x)) } }
         }
-        if out.isEmpty { throw AppError.message("لا توجد وسائط في المنشور.") }; return out
+        if out.isEmpty { throw AppError.message("لا توجد وسائط في المنشور.") }
+        return out
     }
 
     private func resolveMeta(_ source: URL, _ p: PlatformKind) async throws -> [DownloadMedia] {
@@ -157,14 +192,29 @@ final class AppModel: ObservableObject {
     }
 
     private func mediaFolder() -> URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Hammel", isDirectory: true) }
-    private func persist(_ tmp: URL, _ filename: String) throws -> URL { let f = mediaFolder(); try FileManager.default.createDirectory(at: f, withIntermediateDirectories: true); var name = sanitize(filename); if (name as NSString).pathExtension.isEmpty { name += ".mp4" }; var dst = f.appendingPathComponent(name); var n = 2; while FileManager.default.fileExists(atPath: dst.path) { let b = (name as NSString).deletingPathExtension, e = (name as NSString).pathExtension; dst = f.appendingPathComponent("\(b)-\(n).\(e)"); n += 1 }; try FileManager.default.moveItem(at: tmp, to: dst); return dst }
-    private func saveToPhotos(_ u: URL) async throws { let s = await PHPhotoLibrary.requestAuthorization(for: .addOnly); guard s == .authorized || s == .limited else { throw AppError.message("اسمح للتطبيق بالحفظ في الصور.") }; try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in PHPhotoLibrary.shared().performChanges({ if ["mp4","mov","m4v"].contains(u.pathExtension.lowercased()) { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) } else { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) } }) { ok, e in ok ? c.resume() : c.resume(throwing: e ?? AppError.message("تعذر الحفظ في الصور.")) } } }
+    private func persist(_ tmp: URL, _ filename: String) throws -> URL {
+        let f = mediaFolder(); try FileManager.default.createDirectory(at: f, withIntermediateDirectories: true)
+        var name = sanitize(filename); if (name as NSString).pathExtension.isEmpty { name += ".mp4" }
+        var dst = f.appendingPathComponent(name), n = 2
+        while FileManager.default.fileExists(atPath: dst.path) { let b = (name as NSString).deletingPathExtension, e = (name as NSString).pathExtension; dst = f.appendingPathComponent("\(b)-\(n).\(e)"); n += 1 }
+        try FileManager.default.moveItem(at: tmp, to: dst); return dst
+    }
+    private func saveToPhotos(_ u: URL) async throws {
+        let s = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard s == .authorized || s == .limited else { throw AppError.message("اسمح للتطبيق بالحفظ في الصور.") }
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges({
+                if ["mp4","mov","m4v"].contains(u.pathExtension.lowercased()) { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) }
+                else { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) }
+            }) { ok, e in ok ? c.resume() : c.resume(throwing: e ?? AppError.message("تعذر الحفظ في الصور.")) }
+        }
+    }
     private func fetchHTML(_ u: URL, _ referer: String?) async throws -> (String, URL) { var r = URLRequest(url: u); r.timeoutInterval = 30; r.setValue(ua, forHTTPHeaderField: "User-Agent"); if let referer { r.setValue(referer, forHTTPHeaderField: "Referer") }; let (d, response) = try await URLSession.shared.data(for: r); guard let h = response as? HTTPURLResponse, (200..<400).contains(h.statusCode), let s = String(data: d, encoding: .utf8) else { throw URLError(.badServerResponse) }; return (s, h.url ?? u) }
     private func regexFirst(_ s: String, _ p: String) -> String? { guard let re = try? NSRegularExpression(pattern: p, options: [.dotMatchesLineSeparators,.caseInsensitive]), let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)), m.numberOfRanges > 1, let r = Range(m.range(at: 1), in: s) else { return nil }; return String(s[r]) }
     private func extractJSONObject(after marker: String, in text: String) -> String? { guard let mr = text.range(of: marker) else { return nil }; var i = mr.upperBound; while i < text.endIndex && text[i] != "{" { i = text.index(after: i) }; guard i < text.endIndex else { return nil }; var depth = 0, inside = false, esc = false, j = i; while j < text.endIndex { let c = text[j]; if inside { if esc { esc = false } else if c == "\\" { esc = true } else if c == "\"" { inside = false } } else { if c == "\"" { inside = true } else if c == "{" { depth += 1 } else if c == "}" { depth -= 1; if depth == 0 { return String(text[i...j]) } } }; j = text.index(after: j) }; return nil }
     private func meta(_ html: String, _ names: [String]) -> [String] { var out: [String] = []; for n in names { let e = NSRegularExpression.escapedPattern(for: n); for p in [#"<meta[^>]+(?:property|name)=[\"']"# + e + #"[\"'][^>]+content=[\"']([^\"']+)[\"']"#, #"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+(?:property|name)=[\"']"# + e + #"[\"']"#] { if let x = regexFirst(html, p) { out.append(x) } } }; return out }
-    private func firstURL(in v: Any, keys: [String]) -> String? { if let d = v as? [String: Any] { for k in keys { if let s = d[k] as? String, s.hasPrefix("http") { return s }; if let a = d[k] as? [String], let s = a.first(where: { $0.hasPrefix("http") }) { return s }; if let sub = d[k] as? [String: Any], let a = (sub["urlList"] ?? sub["url_list"]) as? [String], let s = a.first { return s } }; for c in d.values { if let x = firstURL(in: c, keys: keys) { return x } } }; if let a = v as? [Any] { for c in a { if let x = firstURL(in: c, keys: keys) { return x } } }; return nil }
-    private func firstString(in v: Any, keys: [String]) -> String? { if let d = v as? [String: Any] { for k in keys { if let s = d[k] as? String, !s.isEmpty { return s }; if let n = d[k] as? NSNumber { return n.stringValue } }; for c in d.values { if let x = firstString(in: c, keys: keys) { return x } } }; if let a = v as? [Any] { for c in a { if let x = firstString(in: c, keys: keys) { return x } } }; return nil }
+    private func firstURL(in v: Any, keys: [String]) -> String? { if let d = v as? [String: Any] { for k in keys { if let s = d[k] as? String, s.hasPrefix("http") { return s }; if let a = d[k] as? [String], let s = a.first(where: { $0.hasPrefix("http") }) { return s }; if let sub = d[k] as? [String: Any], let a = (sub["urlList"] ?? sub["url_list"]) as? [String], let s = a.first { return s } }; for child in d.values { if let x = firstURL(in: child, keys: keys) { return x } } }; if let a = v as? [Any] { for child in a { if let x = firstURL(in: child, keys: keys) { return x } } }; return nil }
+    private func firstString(in v: Any, keys: [String]) -> String? { if let d = v as? [String: Any] { for k in keys { if let s = d[k] as? String, !s.isEmpty { return s }; if let n = d[k] as? NSNumber { return n.stringValue } }; for child in d.values { if let x = firstString(in: child, keys: keys) { return x } } }; if let a = v as? [Any] { for child in a { if let x = firstString(in: child, keys: keys) { return x } } }; return nil }
     private func sanitize(_ s: String) -> String { let bad = CharacterSet(charactersIn: "/\\:?%*|\"<>"); let x = s.components(separatedBy: bad).joined(separator: "-").trimmingCharacters(in: .whitespacesAndNewlines); return x.isEmpty ? "media" : String(x.prefix(100)) }
     private func decodeEscapedURL(_ s: String) -> String { s.replacingOccurrences(of: "\\u002F", with: "/").replacingOccurrences(of: "\\/", with: "/").replacingOccurrences(of: "\\u0026", with: "&") }
     private func htmlDecode(_ s: String) -> String { s.replacingOccurrences(of: "&amp;", with: "&").replacingOccurrences(of: "&#x2F;", with: "/") }
@@ -193,9 +243,13 @@ struct HomeView: View {
                 VStack(spacing: 18) {
                     HStack {
                         VStack(alignment: .trailing, spacing: 4) { Text("حمّل").font(.system(size: 40, weight: .black)); Text("نزّل، احفظ، وعدّل").foregroundStyle(.secondary) }
-                        Spacer(); ZStack { RoundedRectangle(cornerRadius: 22).fill(.orange.gradient); Image(systemName: "arrow.down.to.line.compact").font(.system(size: 32, weight: .bold)).foregroundStyle(.white) }.frame(width: 72, height: 72)
+                        Spacer()
+                        ZStack { RoundedRectangle(cornerRadius: 22).fill(.orange.gradient); Image(systemName: "arrow.down.to.line.compact").font(.system(size: 32, weight: .bold)).foregroundStyle(.white) }.frame(width: 72, height: 72)
                     }.padding(18).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30))
-                    HStack(spacing: 10) { Button { model.input = UIPasteboard.general.string ?? "" } label: { Image(systemName: "doc.on.clipboard.fill").frame(width: 44, height: 44).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14)) }; TextField("الصق رابط TikTok / YouTube / X…", text: $model.input).textInputAutocapitalization(.never).autocorrectionDisabled().multilineTextAlignment(.trailing).padding(.vertical, 14) }.padding(.horizontal, 12).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
+                    HStack(spacing: 10) {
+                        Button { model.input = UIPasteboard.general.string ?? "" } label: { Image(systemName: "doc.on.clipboard.fill").frame(width: 44, height: 44).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14)) }
+                        TextField("الصق رابط TikTok / YouTube / X…", text: $model.input).textInputAutocapitalization(.never).autocorrectionDisabled().multilineTextAlignment(.trailing).padding(.vertical, 14)
+                    }.padding(.horizontal, 12).background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22))
                     Button { Task { await model.resolve() } } label: { HStack { if model.isLoading { ProgressView().tint(.white) }; Text(model.isLoading ? "جاري التحليل" : "جلب المحتوى").font(.headline); Image(systemName: "arrow.down.circle.fill") }.frame(maxWidth: .infinity).padding(.vertical, 15).foregroundStyle(.white).background(.orange.gradient, in: RoundedRectangle(cornerRadius: 20)) }.disabled(model.input.isEmpty || model.isLoading)
                     HStack { Circle().fill(model.activeEngine == "تعذر الجلب" ? .red : .green).frame(width: 8, height: 8); Text("\(model.detectedPlatform) • \(model.activeEngine)").font(.caption).foregroundStyle(.secondary); Spacer() }
                     if let e = model.error { Label(e, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .trailing).padding(14).background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 18)) }
@@ -238,7 +292,13 @@ struct LibraryView: View {
 
 struct LibraryRow: View {
     let item: LocalMedia
-    var body: some View { HStack(spacing: 12) { Image(systemName: ["jpg","jpeg","png","webp"].contains(item.url.pathExtension.lowercased()) ? "photo.fill" : "play.rectangle.fill").font(.title2).foregroundStyle(.orange).frame(width: 56, height: 56).background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 16)); VStack(alignment: .trailing, spacing: 4) { Text(item.url.lastPathComponent).foregroundStyle(.primary).lineLimit(1); Text(item.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .trailing); Image(systemName: "chevron.left").foregroundStyle(.secondary) }.padding(12).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20)) }
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: ["jpg","jpeg","png","webp"].contains(item.url.pathExtension.lowercased()) ? "photo.fill" : "play.rectangle.fill").font(.title2).foregroundStyle(.orange).frame(width: 56, height: 56).background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: .trailing, spacing: 4) { Text(item.url.lastPathComponent).foregroundStyle(.primary).lineLimit(1); Text(item.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .trailing)
+            Image(systemName: "chevron.left").foregroundStyle(.secondary)
+        }.padding(12).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
+    }
 }
 
 struct MediaDetailView: View {
