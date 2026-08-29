@@ -77,9 +77,7 @@ struct FloatingPlaybackDock: View {
                 .clipShape(Capsule())
                 .padding(.horizontal, 18)
             }
-            .fullScreenCover(isPresented: $center.expanded) {
-                ImmersivePlaybackView()
-            }
+            .fullScreenCover(isPresented: $center.expanded) { ImmersivePlaybackView() }
         }
     }
 
@@ -90,7 +88,7 @@ struct FloatingPlaybackDock: View {
     }
 }
 
-// MARK: - Immersive full screen player with auto-hidden controls
+// MARK: - Immersive full screen player
 
 struct ImmersivePlaybackView: View {
     @ObservedObject private var center = PlaybackCenter.shared
@@ -131,10 +129,9 @@ struct ImmersivePlaybackView: View {
                     VStack(spacing: 0) {
                         topBar(item)
                         Spacer()
-                        bottomControls(item)
+                        bottomControls
                     }
                     .transition(.opacity)
-                    .animation(.easeOut(duration: 0.18), value: controlsVisible)
                 }
             }
         }
@@ -151,18 +148,16 @@ struct ImmersivePlaybackView: View {
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
                     .frame(width: 42, height: 42)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .background(.black.opacity(0.34), in: Circle())
             }
             .buttonStyle(.plain)
-
             Spacer()
-
             Text(item.url.deletingPathExtension().lastPathComponent)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-
             Spacer()
             Color.clear.frame(width: 42, height: 42)
         }
@@ -170,8 +165,8 @@ struct ImmersivePlaybackView: View {
         .padding(.top, 8)
     }
 
-    private func bottomControls(_ item: LocalMedia) -> some View {
-        VStack(spacing: 11) {
+    private var bottomControls: some View {
+        VStack(spacing: 10) {
             Slider(
                 value: Binding(get: { center.currentTime }, set: { center.seek(to: $0); scheduleHide() }),
                 in: 0...max(1, center.duration)
@@ -204,15 +199,15 @@ struct ImmersivePlaybackView: View {
             .foregroundStyle(.white)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 15)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.vertical, 14)
+        .background(.black.opacity(0.46), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 14)
         .padding(.bottom, 12)
     }
 
     private func toggleControls() {
         hideTask?.cancel()
-        withAnimation(.easeOut(duration: 0.17)) { controlsVisible.toggle() }
+        withAnimation(.easeOut(duration: 0.16)) { controlsVisible.toggle() }
         if controlsVisible { scheduleHide() }
     }
 
@@ -220,11 +215,9 @@ struct ImmersivePlaybackView: View {
         hideTask?.cancel()
         guard center.isPlaying else { return }
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: .seconds(2.5))
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.22)) { controlsVisible = false }
-            }
+            await MainActor.run { withAnimation(.easeOut(duration: 0.20)) { controlsVisible = false } }
         }
     }
 
@@ -245,12 +238,10 @@ struct PlayerSurface: UIViewControllerRepresentable {
         controller.allowsPictureInPicturePlayback = true
         return controller
     }
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
-        uiViewController.player = player
-    }
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) { uiViewController.player = player }
 }
 
-// MARK: - Swipeable compact library row
+// MARK: - Swipeable row. Supports either direction so RTL/LTR both feel natural.
 
 struct SwipeLibraryRow: View {
     @ObservedObject var model: AppModel
@@ -264,32 +255,11 @@ struct SwipeLibraryRow: View {
     @State private var share = false
     @State private var confirmDelete = false
 
+    private let reveal: CGFloat = 126
+
     var body: some View {
         ZStack {
-            if !selecting {
-                HStack(spacing: 8) {
-                    Button { share = true } label: {
-                        Label("مشاركة", systemImage: "square.and.arrow.up")
-                            .labelStyle(.iconOnly)
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .frame(width: 58, height: 58)
-                            .background(Color.blue, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { confirmDelete = true } label: {
-                        Image(systemName: "trash.fill")
-                            .font(.title3)
-                            .foregroundStyle(.white)
-                            .frame(width: 58, height: 58)
-                            .background(Color.red, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    Spacer()
-                }
-                .padding(.leading, 3)
-            }
+            if !selecting { actionBackground }
 
             HStack(spacing: 10) {
                 if selecting {
@@ -329,17 +299,12 @@ struct SwipeLibraryRow: View {
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
             .offset(x: offset)
             .contentShape(Rectangle())
-            .gesture(selecting ? nil : DragGesture(minimumDistance: 12)
-                .onChanged { value in
-                    let x = value.translation.width
-                    offset = min(0, max(-132, x))
-                }
-                .onEnded { value in
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.88)) {
-                        offset = value.translation.width < -55 ? -132 : 0
-                    }
-                })
+            .highPriorityGesture(selecting ? nil : swipeGesture)
+            .onTapGesture {
+                if abs(offset) > 2 { withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) { offset = 0 } }
+            }
         }
+        .clipped()
         .sheet(isPresented: $share) { ActivityShareSheet(items: [item.url]) }
         .confirmationDialog("نقل الملف إلى سلة المهملات؟", isPresented: $confirmDelete) {
             Button("نقل إلى السلة", role: .destructive) {
@@ -349,6 +314,61 @@ struct SwipeLibraryRow: View {
                 }
             }
             Button("إلغاء", role: .cancel) {}
+        }
+    }
+
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .local)
+            .onChanged { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                let x = value.translation.width
+                offset = max(-reveal, min(reveal, x))
+            }
+            .onEnded { value in
+                let predicted = value.predictedEndTranslation.width
+                let actual = value.translation.width
+                let direction: CGFloat = abs(predicted) > abs(actual) ? predicted : actual
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.88)) {
+                    if abs(direction) > 42 {
+                        offset = direction < 0 ? -reveal : reveal
+                    } else {
+                        offset = 0
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder private var actionBackground: some View {
+        HStack(spacing: 8) {
+            if offset >= 0 {
+                actionButtons
+                Spacer(minLength: 0)
+            } else {
+                Spacer(minLength: 0)
+                actionButtons
+            }
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 7) {
+            Button { share = true; offset = 0 } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 55, height: 55)
+                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            Button { confirmDelete = true; offset = 0 } label: {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 55, height: 55)
+                    .background(Color.red, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -363,9 +383,7 @@ struct SwipeLibraryRow: View {
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(model.formattedBytes(item.size))
-                    if !item.ext.isEmpty {
-                        Text(item.ext.uppercased())
-                    }
+                    if !item.ext.isEmpty { Text(item.ext.uppercased()) }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -378,61 +396,67 @@ struct SwipeLibraryRow: View {
 
 struct ActivityShareSheet: UIViewControllerRepresentable {
     let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
+    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-// MARK: - Complete subtitles by transcribing the source in short chunks
+// MARK: - Stable subtitle generation. One language choice, sequential chunks, guarded callbacks.
 
 extension AppModel {
     func translateVideoToSRTComplete(_ item: LocalMedia, targetLanguage: String) async {
-        guard item.isVideo || item.isAudio else {
-            show("اختر فيديو أو ملف صوتي", .info)
-            return
-        }
+        guard item.isVideo || item.isAudio else { show("اختر فيديو أو ملف صوتي", .info); return }
 
         do {
-            let auth = await speechAuthorizationV24()
-            guard auth == .authorized else {
-                throw AppError.message("اسمح بالتعرف على الكلام من إعدادات iOS")
-            }
+            let auth = await speechAuthorizationV25()
+            guard auth == .authorized else { throw AppError.message("اسمح بالتعرف على الكلام من إعدادات iOS") }
 
-            let asset = AVURLAsset(url: item.url)
-            let duration = try await asset.load(.duration).seconds
-            guard duration.isFinite, duration > 0 else { throw AppError.message("تعذر قراءة مدة الملف") }
+            let sourceAudio = try await speechSourceV25(item)
+            defer { if sourceAudio != item.url { try? FileManager.default.removeItem(at: sourceAudio) } }
 
-            let chunkLength = 42.0
+            let sourceAsset = AVURLAsset(url: sourceAudio)
+            let total = try await sourceAsset.load(.duration).seconds
+            guard total.isFinite, total > 0 else { throw AppError.message("تعذر قراءة مدة الصوت") }
+
+            let firstLength = min(28.0, total)
+            let firstChunk = try await exportSpeechChunkV25(asset: sourceAsset, start: 0, duration: firstLength)
+            let locale = try await detectSpeechLocaleV25(url: firstChunk)
+            try? FileManager.default.removeItem(at: firstChunk)
+
+            let chunkLength = 38.0
             var cursor = 0.0
-            var all: [SubtitlePieceV24] = []
+            var pieces: [SubtitlePieceV25] = []
 
-            while cursor < duration - 0.05 {
-                let length = min(chunkLength, duration - cursor)
-                let chunk = try await exportSpeechChunkV24(asset: asset, start: cursor, duration: length)
-                defer { try? FileManager.default.removeItem(at: chunk) }
-
-                if let result = try? await bestSpeechResultV24(url: chunk) {
+            while cursor < total - 0.05 {
+                try Task.checkCancellation()
+                let length = min(chunkLength, total - cursor)
+                let chunk = try await exportSpeechChunkV25(asset: sourceAsset, start: cursor, duration: length)
+                do {
+                    let result = try await recognizeV25(url: chunk, locale: locale)
                     for segment in result.bestTranscription.segments {
                         let text = segment.substring.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !text.isEmpty else { continue }
-                        all.append(.init(
-                            start: cursor + segment.timestamp,
-                            end: cursor + segment.timestamp + max(segment.duration, 0.16),
-                            text: text
-                        ))
+                        if !text.isEmpty {
+                            pieces.append(.init(
+                                start: cursor + segment.timestamp,
+                                end: cursor + segment.timestamp + max(segment.duration, 0.18),
+                                text: text
+                            ))
+                        }
                     }
+                } catch {
+                    // Skip only the failed chunk instead of crashing or losing the rest.
                 }
+                try? FileManager.default.removeItem(at: chunk)
                 cursor += length
+                try? await Task.sleep(for: .milliseconds(120))
             }
 
-            guard !all.isEmpty else { throw AppError.message("لم أتمكن من التعرف على الكلام في هذا المقطع") }
-            let groups = groupSubtitlePiecesV24(all)
+            guard !pieces.isEmpty else { throw AppError.message("لم أتمكن من التعرف على الكلام في هذا المقطع") }
+            let groups = groupPiecesV25(pieces)
 
             var output = ""
             for (index, group) in groups.enumerated() {
-                let translated = try await translateTextV24(group.text, target: targetLanguage)
-                output += "\(index + 1)\n\(srtTimeV24(group.start)) --> \(srtTimeV24(group.end))\n\(translated)\n\n"
+                let translated = (try? await translateTextV25(group.text, target: targetLanguage)) ?? group.text
+                output += "\(index + 1)\n\(srtTimeV25(group.start)) --> \(srtTimeV25(group.end))\n\(translated)\n\n"
             }
 
             let suffix = targetLanguage == "ar" ? "ar" : "en"
@@ -442,107 +466,113 @@ extension AppModel {
             try output.write(to: temp, atomically: true, encoding: .utf8)
             _ = try persist(temp, temp.lastPathComponent)
             refreshStorage()
-            show("تم إنشاء الترجمة كاملة", .success)
+            show("تم إنشاء الترجمة", .success)
+        } catch is CancellationError {
+            show("تم إلغاء الترجمة", .info)
         } catch {
             show(readable(error), .error)
         }
     }
 
-    private func speechAuthorizationV24() async -> SFSpeechRecognizerAuthorizationStatus {
-        await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+    private func speechAuthorizationV25() async -> SFSpeechRecognizerAuthorizationStatus {
+        let current = SFSpeechRecognizer.authorizationStatus()
+        if current != .notDetermined { return current }
+        return await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in continuation.resume(returning: status) }
         }
     }
 
-    private func exportSpeechChunkV24(asset: AVAsset, start: Double, duration: Double) async throws -> URL {
-        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
-            throw AppError.message("تعذر تجهيز صوت الفيديو")
-        }
+    private func speechSourceV25(_ item: LocalMedia) async throws -> URL {
+        guard item.isVideo else { return item.url }
+        let asset = AVURLAsset(url: item.url)
+        guard !((try? await asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty else { throw AppError.message("الفيديو لا يحتوي على صوت") }
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { throw AppError.message("تعذر تجهيز صوت الفيديو") }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("speech-source-\(UUID().uuidString).m4a")
+        try? FileManager.default.removeItem(at: url)
+        export.outputURL = url
+        export.outputFileType = .m4a
+        await export.export()
+        guard export.status == .completed else { throw export.error ?? AppError.message("تعذر استخراج صوت الفيديو") }
+        return url
+    }
+
+    private func exportSpeechChunkV25(asset: AVAsset, start: Double, duration: Double) async throws -> URL {
+        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else { throw AppError.message("تعذر تجهيز جزء من الصوت") }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("speech-chunk-\(UUID().uuidString).m4a")
         try? FileManager.default.removeItem(at: url)
         export.outputURL = url
         export.outputFileType = .m4a
-        export.timeRange = CMTimeRange(
-            start: CMTime(seconds: start, preferredTimescale: 600),
-            duration: CMTime(seconds: duration, preferredTimescale: 600)
-        )
+        export.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), duration: CMTime(seconds: duration, preferredTimescale: 600))
         await export.export()
-        guard export.status == .completed else {
-            throw export.error ?? AppError.message("تعذر تجهيز جزء من الصوت")
-        }
+        guard export.status == .completed else { throw export.error ?? AppError.message("تعذر تجهيز جزء من الصوت") }
         return url
     }
 
-    private func bestSpeechResultV24(url: URL) async throws -> SFSpeechRecognitionResult {
-        let locales = ["ar-SA", "en-US", "en-GB"]
-        var best: SFSpeechRecognitionResult?
-        var lastError: Error?
-        for id in locales {
-            do {
-                let result = try await recognizeV24(url: url, locale: Locale(identifier: id))
-                if result.bestTranscription.formattedString.count > (best?.bestTranscription.formattedString.count ?? 0) {
-                    best = result
-                }
-            } catch { lastError = error }
+    private func detectSpeechLocaleV25(url: URL) async throws -> Locale {
+        let candidates = [Locale(identifier: "en-US"), Locale(identifier: "ar-SA")]
+        var bestLocale: Locale?
+        var bestCount = 0
+        for locale in candidates {
+            if let result = try? await recognizeV25(url: url, locale: locale) {
+                let count = result.bestTranscription.formattedString.count
+                if count > bestCount { bestCount = count; bestLocale = locale }
+            }
         }
-        if let best { return best }
-        throw lastError ?? AppError.message("تعذر التعرف على الكلام")
+        return bestLocale ?? Locale(identifier: "en-US")
     }
 
-    private func recognizeV24(url: URL, locale: Locale) async throws -> SFSpeechRecognitionResult {
-        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
-            throw AppError.message("التعرف على الكلام غير متاح الآن")
-        }
+    private func recognizeV25(url: URL, locale: Locale) async throws -> SFSpeechRecognitionResult {
+        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else { throw AppError.message("التعرف على الكلام غير متاح الآن") }
         let request = SFSpeechURLRecognitionRequest(url: url)
         request.shouldReportPartialResults = false
         request.taskHint = .dictation
+
         return try await withCheckedThrowingContinuation { continuation in
-            var completed = false
-            var task: SFSpeechRecognitionTask?
-            task = recognizer.recognitionTask(with: request) { result, error in
-                if let result, result.isFinal, !completed {
-                    completed = true
-                    continuation.resume(returning: result)
-                    task?.cancel()
-                } else if let error, !completed {
-                    completed = true
-                    continuation.resume(throwing: error)
-                    task?.cancel()
+            let lock = NSLock()
+            var resumed = false
+            var recognitionTask: SFSpeechRecognitionTask?
+
+            func finish(_ result: Result<SFSpeechRecognitionResult, Error>) {
+                lock.lock()
+                if resumed { lock.unlock(); return }
+                resumed = true
+                lock.unlock()
+                recognitionTask?.cancel()
+                switch result {
+                case .success(let value): continuation.resume(returning: value)
+                case .failure(let error): continuation.resume(throwing: error)
                 }
+            }
+
+            recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+                if let result, result.isFinal { finish(.success(result)) }
+                else if let error { finish(.failure(error)) }
             }
         }
     }
 
-    private struct SubtitlePieceV24 {
-        let start: Double
-        let end: Double
-        let text: String
-    }
+    private struct SubtitlePieceV25 { let start: Double; let end: Double; let text: String }
 
-    private func groupSubtitlePiecesV24(_ pieces: [SubtitlePieceV24]) -> [SubtitlePieceV24] {
-        var result: [SubtitlePieceV24] = []
+    private func groupPiecesV25(_ pieces: [SubtitlePieceV25]) -> [SubtitlePieceV25] {
+        var result: [SubtitlePieceV25] = []
         var words: [String] = []
         var start = 0.0
         var end = 0.0
-
         for piece in pieces.sorted(by: { $0.start < $1.start }) {
             if words.isEmpty { start = piece.start }
             words.append(piece.text)
             end = piece.end
-            let textLength = words.joined(separator: " ").count
-            if words.count >= 8 || end - start >= 3.4 || textLength >= 58 {
-                result.append(.init(start: start, end: max(end, start + 0.3), text: words.joined(separator: " ")))
+            let combined = words.joined(separator: " ")
+            if words.count >= 8 || end - start >= 3.6 || combined.count >= 62 {
+                result.append(.init(start: start, end: max(end, start + 0.30), text: combined))
                 words.removeAll(keepingCapacity: true)
             }
         }
-
-        if !words.isEmpty {
-            result.append(.init(start: start, end: max(end, start + 0.3), text: words.joined(separator: " ")))
-        }
+        if !words.isEmpty { result.append(.init(start: start, end: max(end, start + 0.30), text: words.joined(separator: " "))) }
         return result
     }
 
-    private func translateTextV24(_ text: String, target: String) async throws -> String {
+    private func translateTextV25(_ text: String, target: String) async throws -> String {
         guard var parts = URLComponents(string: "https://translate.googleapis.com/translate_a/single") else { return text }
         parts.queryItems = [
             .init(name: "client", value: "gtx"),
@@ -553,18 +583,16 @@ extension AppModel {
         ]
         guard let url = parts.url else { return text }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 25
+        request.timeoutInterval = 20
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let root = try JSONSerialization.jsonObject(with: data) as? [Any],
-              let rows = root.first as? [Any] else {
-            throw AppError.message("تعذر ترجمة النص الآن")
-        }
+              let rows = root.first as? [Any] else { throw AppError.message("تعذر ترجمة جزء من النص") }
         let translated = rows.compactMap { ($0 as? [Any])?.first as? String }.joined()
         return translated.isEmpty ? text : translated
     }
 
-    private func srtTimeV24(_ seconds: Double) -> String {
+    private func srtTimeV25(_ seconds: Double) -> String {
         let ms = max(0, Int(seconds * 1000))
         return String(format: "%02d:%02d:%02d,%03d", ms / 3_600_000, (ms / 60_000) % 60, (ms / 1000) % 60, ms % 1000)
     }
