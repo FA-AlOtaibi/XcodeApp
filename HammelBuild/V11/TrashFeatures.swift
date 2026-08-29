@@ -21,50 +21,100 @@ struct TrashView: View {
 }
 
 struct MediaQuickActionsSheet: View {
-    @ObservedObject var model:AppModel; let item:LocalMedia; @Environment(\.dismiss) private var dismiss; @State private var busy=false; @State private var share=false
-    var body: some View { NavigationStack{VStack(spacing:12){
-        HStack(spacing:10){LocalThumb(item:item).frame(width:48,height:44).clipShape(RoundedRectangle(cornerRadius:10));VStack(alignment:.leading,spacing:2){Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1);Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)};Spacer();Button{dismiss()}label:{Image(systemName:"xmark.circle.fill").font(.title2).foregroundStyle(.secondary)}}
-        HStack(spacing:7){
-            if item.isVideo{NavigationLink{MediaEditorView(sourceURL:item.url,model:model)}label:{CompactTool(title:"تعديل",icon:"slider.horizontal.3")}.buttonStyle(.plain)}
-            Menu{
-                if item.isVideo{
-                    Button("حذف الموسيقى وإبقاء الكلام",systemImage:"mic.fill"){run{await model.separateCenterAudioFast(from:item,keepVoice:true)}}
-                    Button("حذف الكلام وإبقاء الموسيقى",systemImage:"music.note"){run{await model.separateCenterAudioFast(from:item,keepVoice:false)}}
-                    Button("استخراج الصوت M4A",systemImage:"waveform"){run{await model.extractAudio(from:item)}}
-                    Button("كتم صوت الفيديو",systemImage:"speaker.slash"){run{await model.muteVideo(item)}}
-                    Button("تحويل إلى نغمة رنين",systemImage:"bell.fill"){run{await model.makeRingtone(item)}}
-                    Button("تحويل إلى MP3",systemImage:"music.note.list"){model.showUnsupportedAI("تحويل MP3")}
-                } else if item.isAudio {
-                    Button("تحويل إلى نغمة رنين",systemImage:"bell.fill"){run{await model.makeRingtone(item)}}
+    @ObservedObject var model:AppModel
+    let item:LocalMedia
+    @Environment(\.dismiss) private var dismiss
+    @State private var busy=false
+    @State private var share=false
+    @State private var translation=false
+    @State private var textOverlay=false
+    @State private var crop=false
+    @State private var info=false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing:12) {
+                HStack(spacing:10){
+                    LocalThumb(item:item).frame(width:48,height:44).clipShape(RoundedRectangle(cornerRadius:10))
+                    VStack(alignment:.leading,spacing:2){Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1);Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)}
+                    Spacer()
+                    Button{dismiss()}label:{Image(systemName:"xmark.circle.fill").font(.title2).foregroundStyle(.secondary)}
                 }
-            }label:{CompactTool(title:"الصوت",icon:"waveform")}
-            Menu{
-                if item.isVideo{
-                    Button("تحويل إلى GIF",systemImage:"photo.stack"){run{await model.videoToGIF(item)}}
-                    Button("ضغط / نسخة 720p",systemImage:"arrow.down.right.and.arrow.up.left"){run{await model.compress720(from:item)}}
-                    Button("تدوير 90°",systemImage:"rotate.right"){run{await model.rotateVideo90(item)}}
-                    Button("لقطة وسطية",systemImage:"photo"){run{await model.grabMiddleFrame(from:item)}}
-                    Button("لوحة 9 لقطات",systemImage:"square.grid.3x3"){run{await model.contactSheet(from:item)}}
-                    Button("ترجمة الفيديو",systemImage:"captions.bubble"){model.showUnsupportedAI("ترجمة الفيديو")}
-                    Button("عكس الفيديو",systemImage:"backward.end"){model.showUnsupportedAI("عكس الفيديو")}
+
+                HStack(spacing:7){
+                    if item.isVideo { NavigationLink{MediaEditorView(sourceURL:item.url,model:model)}label:{CompactTool(title:"تعديل",icon:"slider.horizontal.3")}.buttonStyle(.plain) }
+
+                    Menu {
+                        if item.isVideo {
+                            Button("حذف الموسيقى وإبقاء الكلام",systemImage:"mic.fill"){run{await model.separateCenterAudioFast(from:item,keepVoice:true)}}
+                            Button("حذف الكلام وإبقاء الموسيقى",systemImage:"music.note"){run{await model.separateCenterAudioFast(from:item,keepVoice:false)}}
+                            Button("استخراج الصوت M4A",systemImage:"waveform"){run{await model.extractAudio(from:item)}}
+                            Button("تحويل إلى MP3",systemImage:"music.note.list"){run{await model.convertToMP3(item)}}
+                            Button("كتم صوت الفيديو",systemImage:"speaker.slash"){run{await model.muteVideo(item)}}
+                            Button("تحويل إلى نغمة رنين",systemImage:"bell.fill"){run{await model.makeRingtone(item)}}
+                        } else if item.isAudio {
+                            Button("تحويل إلى MP3",systemImage:"music.note.list"){run{await model.convertToMP3(item)}}
+                            Button("تحويل إلى نغمة رنين",systemImage:"bell.fill"){run{await model.makeRingtone(item)}}
+                        }
+                    } label: { CompactTool(title:"الصوت",icon:"waveform") }
+
+                    Menu {
+                        if item.isVideo {
+                            Button("ترجمة الفيديو",systemImage:"captions.bubble"){translation=true}
+                            Button("الكتابة على الفيديو",systemImage:"textformat"){textOverlay=true}
+                            Button("تقطيع حدود الفيديو",systemImage:"crop"){crop=true}
+                            Button("عكس الفيديو",systemImage:"backward.end"){run{await model.reverseVideo(item)}}
+                            Button("تحويل إلى GIF",systemImage:"photo.stack"){run{await model.videoToGIF(item)}}
+                            Button("ضغط / نسخة 720p",systemImage:"arrow.down.right.and.arrow.up.left"){run{await model.compress720(from:item)}}
+                            Button("تدوير 90°",systemImage:"rotate.right"){run{await model.rotateVideo90(item)}}
+                            Button("لقطة وسطية",systemImage:"photo"){run{await model.grabMiddleFrame(from:item)}}
+                            Button("لوحة 9 لقطات",systemImage:"square.grid.3x3"){run{await model.contactSheet(from:item)}}
+                            Menu("تغيير الصيغة", systemImage:"arrow.triangle.2.circlepath") {
+                                Button("MP4"){run{await model.changeVideoFormat(item,toMov:false)}}
+                                Button("MOV"){run{await model.changeVideoFormat(item,toMov:true)}}
+                            }
+                        }
+                        if item.ext=="gif"{Button("GIF إلى فيديو",systemImage:"film"){run{await model.gifToVideo(item)}}}
+                        if item.isImage{Button("إزالة الخلفية",systemImage:"person.crop.rectangle.badge.minus"){run{await model.removeImageBackground(item)}}}
+                        if item.isImage || item.isVideo{Button("تنظيف الخصوصية",systemImage:"shield"){run{await model.privacyCleanCopy(from:item)}}}
+                        Button("إنشاء نسخة",systemImage:"doc.on.doc"){model.duplicateMedia(item)}
+                        Button("معلومات",systemImage:"info.circle"){info=true}
+                    } label: { CompactTool(title:"أدوات",icon:"wand.and.stars") }
+
+                    Menu {
+                        if item.isImage || item.isVideo {
+                            Button("حفظ في الاستوديو",systemImage:"photo.badge.plus"){run{await model.saveExistingToPhotos(item.url)}}
+                            Button("إرسال إلى Snapchat",systemImage:"paperplane"){model.prepareForSnapchat(item);share=true}
+                            Button("إرسال إلى TikTok",systemImage:"music.note"){share=true}
+                        }
+                        Button(model.isFavorite(item) ? "إلغاء التثبيت":"تثبيت", systemImage:model.isFavorite(item) ? "pin.slash":"pin") { model.toggleFavorite(item) }
+                        ShareLink(item:item.url){Label("مشاركة للتطبيقات",systemImage:"square.and.arrow.up")}
+                        ShareLink(item:item.url){Label("نقل / تصدير الملف",systemImage:"folder")}
+                    } label: { CompactTool(title:"مشاركة",icon:"square.and.arrow.up") }
                 }
-                if item.ext=="gif"{Button("GIF إلى فيديو",systemImage:"film"){run{await model.gifToVideo(item)}}}
-                if item.isImage{Button("إزالة الخلفية",systemImage:"person.crop.rectangle.badge.minus"){run{await model.removeImageBackground(item)}}}
-                if item.isImage || item.isVideo{Button("تنظيف الخصوصية",systemImage:"shield"){run{await model.privacyCleanCopy(from:item)}}}
-                Button("إنشاء نسخة",systemImage:"doc.on.doc"){model.duplicateMedia(item)}
-                Button("تغيير الصيغة",systemImage:"arrow.triangle.2.circlepath"){model.showUnsupportedAI("تغيير الصيغة")}
-            }label:{CompactTool(title:"أدوات",icon:"wand.and.stars")}
-            Menu{
-                if item.isImage || item.isVideo{Button("حفظ في الصور",systemImage:"photo.badge.plus"){run{await model.saveExistingToPhotos(item.url)}};Button("Snapchat",systemImage:"paperplane"){model.prepareForSnapchat(item);share=true}}
-                ShareLink(item:item.url){Label("مشاركة للتطبيقات",systemImage:"square.and.arrow.up")}
-            }label:{CompactTool(title:"مشاركة",icon:"square.and.arrow.up")}
+
+                HStack(spacing:8){
+                    Button{model.autoRename(item);dismiss()}label:{Label("اسم مرتب",systemImage:"textformat").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(.thinMaterial,in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain)
+                    Button(role:.destructive){model.moveToTrash(item);dismiss()}label:{Label("حذف",systemImage:"trash").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(Color.red.opacity(0.10),in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain)
+                }
+                if busy{HStack(spacing:7){ProgressView();Text("جارٍ تنفيذ العملية…").font(.caption).foregroundStyle(.secondary)}}
+            }
+            .padding(14)
+            .navigationBarHidden(true)
         }
-        HStack(spacing:8){Button{model.autoRename(item);dismiss()}label:{Label("اسم مرتب",systemImage:"textformat").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(.thinMaterial,in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain);Button(role:.destructive){model.moveToTrash(item);dismiss()}label:{Label("حذف",systemImage:"trash").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(Color.red.opacity(0.10),in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain)}
-        if busy{HStack(spacing:7){ProgressView();Text("جارٍ المعالجة…").font(.caption).foregroundStyle(.secondary)}}
-        Text("أدوات الفصل الصوتي الحالية محلية وسريعة؛ أفضل نتيجة عندما يكون الكلام في منتصف الستيريو.").font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
-    }.padding(14).navigationBarHidden(true)}.presentationDetents([.height(250),.medium]).presentationDragIndicator(.visible).sheet(isPresented:$share){ActivityShareView(items:[item.url])} }
-    private func run(_ op:@escaping()->Void){busy=true;op();DispatchQueue.main.asyncAfter(deadline:.now()+0.2){busy=false}}
+        .presentationDetents([.height(225),.medium])
+        .presentationDragIndicator(.visible)
+        .sheet(isPresented:$share){ActivityShareView(items:[item.url])}
+        .sheet(isPresented:$translation){TranslationChoiceSheet(model:model,item:item)}
+        .sheet(isPresented:$textOverlay){TextOverlaySheet(model:model,item:item)}
+        .sheet(isPresented:$crop){CropChoiceSheet(model:model,item:item)}
+        .sheet(isPresented:$info){MediaInfoSheet(item:item)}
+    }
+
     private func run(_ op:@escaping() async->Void){busy=true;Task{await op();busy=false}}
 }
 
-struct CompactTool: View { let title:String;let icon:String;var body: some View{VStack(spacing:4){Image(systemName:icon).font(.headline);Text(title).font(.caption2.weight(.medium)).lineLimit(1)}.frame(maxWidth:.infinity).frame(height:52).background(.thinMaterial,in:RoundedRectangle(cornerRadius:13))} }
+struct CompactTool: View {
+    let title:String; let icon:String
+    var body: some View { VStack(spacing:4){Image(systemName:icon).font(.headline);Text(title).font(.caption2.weight(.medium)).lineLimit(1)}.frame(maxWidth:.infinity).frame(height:50).background(.thinMaterial,in:RoundedRectangle(cornerRadius:13)) }
+}
