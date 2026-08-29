@@ -25,6 +25,9 @@ private final class ProgressFileDownloader: NSObject, URLSessionDownloadDelegate
             let configuration = URLSessionConfiguration.default
             configuration.timeoutIntervalForRequest = request.timeoutInterval
             configuration.timeoutIntervalForResource = max(request.timeoutInterval, 300)
+            configuration.httpMaximumConnectionsPerHost = 8
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            configuration.waitsForConnectivity = false
             let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
             self.session = session
             session.downloadTask(with: request).resume()
@@ -146,12 +149,79 @@ extension AppModel {
     }
 
     private func smartDownload(_ url: URL, referer: String?, progress: @escaping (Double) -> Void) async throws -> URL {
+        if (url.host ?? "").contains("googlevideo.com"), let accelerated = try? await parallelSmallDownload(url, referer: referer, progress: progress) {
+            return accelerated
+        }
         var req = URLRequest(url: url)
-        req.timeoutInterval = 240
+        req.timeoutInterval = 180
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let referer { req.setValue(referer, forHTTPHeaderField: "Referer") }
         let downloader = ProgressFileDownloader(progress: progress)
         return try await downloader.download(req)
+    }
+
+    private func parallelSmallDownload(_ url: URL, referer: String?, progress: @escaping (Double) -> Void) async throws -> URL {
+        var probe = URLRequest(url: url)
+        probe.timeoutInterval = 20
+        probe.setValue(ua, forHTTPHeaderField: "User-Agent")
+        probe.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+        probe.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        if let referer { probe.setValue(referer, forHTTPHeaderField: "Referer") }
+        let (_, probeResponse) = try await URLSession.shared.data(for: probe)
+        guard let http = probeResponse as? HTTPURLResponse,
+              http.statusCode == 206,
+              let contentRange = http.value(forHTTPHeaderField: "Content-Range"),
+              let slash = contentRange.lastIndex(of: "/"),
+              let total = Int64(contentRange[contentRange.index(after: slash)...]),
+              total >= 1_000_000,
+              total <= 80_000_000 else { throw URLError(.cannotParseResponse) }
+
+        let parts = total < 8_000_000 ? 3 : 4
+        let chunk = Int64(ceil(Double(total) / Double(parts)))
+        let config = URLSessionConfiguration.default
+        config.httpMaximumConnectionsPerHost = 8
+        config.timeoutIntervalForRequest = 90
+        config.timeoutIntervalForResource = 180
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let session = URLSession(configuration: config)
+
+        var results = Array<Data?>(repeating: nil, count: parts)
+        try await withThrowingTaskGroup(of: (Int, Data).self) { group in
+            for index in 0..<parts {
+                let start = Int64(index) * chunk
+                let end = min(total - 1, start + chunk - 1)
+                group.addTask {
+                    var req = URLRequest(url: url)
+                    req.timeoutInterval = 90
+                    req.setValue(self.ua, forHTTPHeaderField: "User-Agent")
+                    req.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+                    req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+                    if let referer { req.setValue(referer, forHTTPHeaderField: "Referer") }
+                    let (data, response) = try await session.data(for: req)
+                    guard let h = response as? HTTPURLResponse, h.statusCode == 206 else { throw URLError(.badServerResponse) }
+                    return (index, data)
+                }
+            }
+            var completed = 0
+            for try await (index, data) in group {
+                results[index] = data
+                completed += 1
+                progress(Double(completed) / Double(parts))
+            }
+        }
+        session.invalidateAndCancel()
+
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("fast-\(UUID().uuidString).mp4")
+        FileManager.default.createFile(atPath: tmp.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: tmp)
+        defer { try? handle.close() }
+        for data in results {
+            guard let data else { throw URLError(.cannotDecodeContentData) }
+            try handle.write(contentsOf: data)
+        }
+        progress(1)
+        return tmp
     }
 
     private func mux(video: URL, audio: URL, output: URL) async throws {
