@@ -61,11 +61,13 @@ jobs:
           p.write_text(s)
 
           for p in Path('V11').glob('*.swift'):
-              if p.name == 'DemucsVendor.swift':
+              if p.name in ('DemucsVendor.swift', 'V26Fixes.swift'):
                   continue
               s = p.read_text()
-              s = s.replace('model.translateVideoToSRT(', 'model.translateVideoToSRTComplete(')
-              s = s.replace('model.translateVideoToSRTFixed(', 'model.translateVideoToSRTComplete(')
+              s = s.replace('model.translateVideoToSRTComplete(', 'model.translateVideoToSRTV26(')
+              s = s.replace('model.translateVideoToSRTFixed(', 'model.translateVideoToSRTV26(')
+              s = s.replace('model.translateVideoToSRT(', 'model.translateVideoToSRTV26(')
+              s = s.replace('TranslationChoiceSheet(', 'TranslationChoiceSheetV26(')
               s = s.replace('model.separateCenterAudioFast(', 'model.separateWithDemucs(')
               s = s.replace('model.separateCenterAudioFixed(', 'model.separateWithDemucs(')
               s = s.replace('model.separateCenterAudio(', 'model.separateWithDemucs(')
@@ -73,6 +75,7 @@ jobs:
 
           p = Path('V11/Views.swift')
           s = p.read_text()
+          s = s.replace('LibraryView(model:model).tabItem', 'LibraryViewV26(model:model).tabItem')
           s = s.replace('}.tint(T.olive).overlay(alignment:.top)', '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){FloatingPlaybackDock()}.overlay(alignment:.top)')
           s = s.replace('Text("نزّل. رتّب. استخدم.").font(.caption).foregroundStyle(.secondary)', 'EmptyView()')
 
@@ -82,10 +85,6 @@ jobs:
               s = s.replace(old, new, 1)
 
           s = s.replace('NavigationLink{MediaDetailView(model:model,item:i)}label:{CompactMediaRow(item:i,model:model)}', 'NavigationLink{Group{if i.ext.lowercased()=="srt" || i.ext.lowercased()=="txt"{SubtitleViewerView(item:i)}else{MediaDetailView(model:model,item:i)}}}label:{CompactMediaRow(item:i,model:model)}')
-
-          old_row = 'LibraryCompactRow(model:model,item:i,selecting:selecting,selected:selected.contains(i.id),toggle:{toggle(i)},actions:{actionItem=i})'
-          new_row = 'SwipeLibraryRow(model:model,item:i,selecting:selecting,selected:selected.contains(i.id),toggle:{toggle(i)},actions:{actionItem=i})'
-          s = s.replace(old_row, new_row)
           p.write_text(s)
           PY
 
