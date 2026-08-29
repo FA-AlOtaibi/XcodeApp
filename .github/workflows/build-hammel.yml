@@ -123,12 +123,10 @@ jobs:
           from pathlib import Path
           import re
 
-          # 1) Make smart tools impossible to miss: replace the ellipsis sheet itself.
           p = Path('V11/V26Fixes.swift')
           s = p.read_text()
           s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { UnifiedFileActionsSheet(model: model, item: $0) }')
           s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0).presentationDetents([.large]) }', '.sheet(item: $actionItem) { UnifiedFileActionsSheet(model: model, item: $0) }')
-          # Add a visible sparkle button beside the ellipsis using regex, regardless of whitespace.
           pattern = r'if !selecting \{\s*Button \{ actionItem = item \} label: \{\s*Image\(systemName: "ellipsis"\)\.frame\(width: 34, height: 34\)\s*\}\.buttonStyle\(\.plain\)\s*\}'
           repl = '''if !selecting {
                 Button { actionItem = item } label: {
@@ -144,31 +142,45 @@ jobs:
           s = re.sub(pattern, repl, s, count=1, flags=re.S)
           p.write_text(s)
 
-          # 2) HQ: do NOT split GoogleVideo adaptive streams into ranges; it can corrupt fMP4.
-          # Download each adaptive stream intact, then transcode/mux with a preset compatible with the source.
           p = Path('V11/SmartDownload.swift')
           s = p.read_text()
           s = s.replace('if (url.host ?? "").contains("googlevideo.com"), let accelerated = try? await parallelSmallDownload(url, referer: referer, progress: progress) {', 'if false, let accelerated = try? await parallelSmallDownload(url, referer: referer, progress: progress) {')
           s = s.replace('try await mux(video: videoTmp, audio: audioTmp, output: mergedTmp)', 'try await muxHQReliableV32(video: videoTmp, audio: audioTmp, output: mergedTmp)')
           p.write_text(s)
 
-          # 3) Editor should always be a true full-screen editor, not a cramped detent.
-          for p in Path('V11').glob('*.swift'):
-              if p.name == 'UnifiedFileActions.swift':
-                  continue
-              s = p.read_text()
-              s = s.replace('NavigationLink { MediaEditorView(sourceURL: item.url, model: model) }', 'NavigationLink { MediaEditorView(sourceURL: item.url, model: model) }')
-              p.write_text(s)
+          # Break the dense caption loop into compiler-friendly statements.
+          p = Path('V11/SmartVideoTools.swift')
+          s = p.read_text()
+          old = 'for seg in result.bestTranscription.segments{words.append(seg);if words.count>=9 || ((words.last?.timestamp ?? 0)+(words.last?.duration ?? 0)-(words.first?.timestamp ?? 0)>3.8){let s=start+(words.first?.timestamp ?? 0);let e=start+(words.last.map{$0.timestamp+$0.duration} ?? 0);let text=words.map(\\.substring).joined(separator:" ");let tr=try await translateV3(text,target:target);output.append(CaptionV3(start:s,end:max(s+0.2,e),source:text,translated:tr));words=[]}}'
+          new = '''for seg in result.bestTranscription.segments {
+                    words.append(seg)
+                    let firstTime = words.first?.timestamp ?? 0
+                    let lastTime = (words.last?.timestamp ?? 0) + (words.last?.duration ?? 0)
+                    let span = lastTime - firstTime
+                    if words.count >= 9 || span > 3.8 {
+                        let absoluteStart = start + firstTime
+                        let absoluteEnd = start + lastTime
+                        let text = words.map(\\.substring).joined(separator: " ")
+                        let translated = try await translateV3(text, target: target)
+                        output.append(CaptionV3(start: absoluteStart, end: max(absoluteStart + 0.2, absoluteEnd), source: text, translated: translated))
+                        words.removeAll(keepingCapacity: true)
+                    }
+                }'''
+          if old not in s:
+              raise SystemExit('caption loop pattern missing')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
 
-          # Sanity checks: fail the build rather than shipping another UI where these are missing.
           v26 = Path('V11/V26Fixes.swift').read_text()
           smart = Path('V11/UnifiedFileActions.swift').read_text()
           down = Path('V11/SmartDownload.swift').read_text()
+          tools = Path('V11/SmartVideoTools.swift').read_text()
           assert 'UnifiedFileActionsSheet' in v26, 'Unified actions not wired'
           for label in ['Smart Clip','ترجمة عربية','حذف الصمت','تتبع 9:16','تنظيف الصوت','صور غلاف']:
               assert label in smart, f'Missing smart feature: {label}'
           assert 'muxHQReliableV32' in down, 'Reliable HQ mux not wired'
           assert 'if false, let accelerated' in down, 'Adaptive range download still enabled'
+          assert 'let firstTime = words.first?.timestamp ?? 0' in tools, 'Caption compiler fix missing'
           PY
 
       - name: Generate Xcode project
