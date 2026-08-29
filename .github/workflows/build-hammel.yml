@@ -11,8 +11,53 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+
       - name: Install XcodeGen
         run: brew install xcodegen
+
+      - name: Add HTDemucs CoreML runtime
+        working-directory: HammelBuild
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/demucs-model /tmp/demucs.zip V11/HTDemucs_SourceSeparation_F32.mlpackage V11/DemucsVendor.swift
+          mkdir -p /tmp/demucs-model
+          curl -L --fail --retry 3 \
+            -o /tmp/demucs.zip \
+            https://github.com/john-rocky/CoreML-Models/releases/download/demucs-v1/HTDemucs_SourceSeparation_F32.mlpackage.zip
+          unzip -q /tmp/demucs.zip -d /tmp/demucs-model
+          MODEL_PATH="$(find /tmp/demucs-model -type d -name 'HTDemucs_SourceSeparation_F32.mlpackage' | head -1)"
+          test -n "$MODEL_PATH"
+          cp -R "$MODEL_PATH" V11/HTDemucs_SourceSeparation_F32.mlpackage
+
+          curl -L --fail --retry 3 \
+            -o V11/DemucsVendor.swift \
+            https://raw.githubusercontent.com/john-rocky/CoreML-Models/master/sample_apps/DemucsDemo/DemucsDemo/ContentView.swift
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('V11/DemucsVendor.swift')
+          s = p.read_text()
+          # Avoid collisions with the app's own views while retaining the tested DSP/model pipeline.
+          replacements = {
+              'struct ContentView: View': 'struct DemucsSampleContentView: View',
+              'ContentView()': 'DemucsSampleContentView()',
+              'StemPlayerView(': 'DemucsSampleStemPlayerView(',
+              'struct StemPlayerView: View': 'struct DemucsSampleStemPlayerView: View',
+              'ShareSheet(': 'DemucsSampleShareSheet(',
+              'struct ShareSheet: UIViewControllerRepresentable': 'struct DemucsSampleShareSheet: UIViewControllerRepresentable',
+              'AudioFilePickerView(': 'DemucsSampleAudioFilePickerView(',
+              'struct AudioFilePickerView: UIViewControllerRepresentable': 'struct DemucsSampleAudioFilePickerView: UIViewControllerRepresentable',
+              'private var stemURLs: [Stem: URL] = [:]': 'var stemURLs: [Stem: URL] = [:]',
+              'private func performSeparation(mode: SeparationMode) async throws': 'func performSeparation(mode: SeparationMode) async throws',
+              'config.computeUnits = .cpuOnly': 'config.computeUnits = .cpuAndGPU',
+          }
+          for a, b in replacements.items():
+              s = s.replace(a, b)
+          p.write_text(s)
+          PY
+
       - name: Wire playback and media fixes
         working-directory: HammelBuild
         run: |
@@ -27,9 +72,12 @@ jobs:
           p.write_text(s)
 
           for p in Path('V11').glob('*.swift'):
+              if p.name == 'DemucsVendor.swift':
+                  continue
               s = p.read_text()
               s = s.replace('model.translateVideoToSRT(', 'model.translateVideoToSRTFixed(')
-              s = s.replace('model.separateCenterAudio(', 'model.separateCenterAudioFixed(')
+              s = s.replace('model.separateCenterAudioFixed(', 'model.separateWithDemucs(')
+              s = s.replace('model.separateCenterAudio(', 'model.separateWithDemucs(')
               p.write_text(s)
 
           p = Path('V11/Views.swift')
@@ -37,14 +85,15 @@ jobs:
           s = s.replace('}.tint(T.olive).overlay(alignment:.top)', '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){MiniPlaybackBar()}.overlay(alignment:.top)')
           old = 'else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}'
           new = 'else{Group{if item.isVideo || item.isAudio{Button{PlaybackCenter.shared.play(item)}label:{content}.buttonStyle(.plain)}else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}}}'
-          if old not in s:
-              raise SystemExit('Library row patch target not found')
-          s = s.replace(old, new, 1)
+          if old in s:
+              s = s.replace(old, new, 1)
           p.write_text(s)
           PY
+
       - name: Generate Xcode project
         working-directory: HammelBuild
         run: xcodegen generate
+
       - name: Build unsigned device app
         working-directory: HammelBuild
         run: |
@@ -60,6 +109,7 @@ jobs:
             CODE_SIGN_IDENTITY='' \
             CONFIGURATION_BUILD_DIR="$PWD/build" \
             clean build
+
       - name: Package IPA
         working-directory: HammelBuild
         run: |
@@ -69,6 +119,7 @@ jobs:
           cp -R build/Hammel.app Payload/Hammel.app
           /usr/bin/zip -qry Hammel-unsigned.ipa Payload
           ls -lh Hammel-unsigned.ipa
+
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
