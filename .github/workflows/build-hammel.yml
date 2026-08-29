@@ -61,7 +61,7 @@ jobs:
           p.write_text(s)
 
           for p in Path('V11').glob('*.swift'):
-              if p.name in ('DemucsVendor.swift', 'V26Fixes.swift'):
+              if p.name in ('DemucsVendor.swift', 'V26Fixes.swift', 'SmartFeaturesCore.swift', 'SmartVideoTools.swift', 'SmartFeaturesUI.swift'):
                   continue
               s = p.read_text()
               s = s.replace('model.translateVideoToSRTComplete(', 'model.translateVideoToSRTV26(')
@@ -73,17 +73,57 @@ jobs:
               s = s.replace('model.separateCenterAudio(', 'model.separateWithDemucs(')
               p.write_text(s)
 
+          # Enable automation rules after link resolution.
+          p = Path('V11/AppCore.swift')
+          s = p.read_text()
+          s = s.replace('            results = media\n', '            results = media\n            await applyDownloadRulesIfNeededV3(source: source)\n', 1)
+          p.write_text(s)
+
+          # Persist source/platform/quality history for both progressive and merged downloads.
+          p = Path('V11/SmartDownload.swift')
+          s = p.read_text()
+          s = s.replace('let saved = try persist(mergedTmp, "\\(base).mp4")', 'let saved = try persist(mergedTmp, "\\(base).mp4")\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
+          s = s.replace('let saved = try persist(tmp, final)', 'let saved = try persist(tmp, final)\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
+          p.write_text(s)
+
+          # Native library: keep the normal tools and add a separate Smart button.
+          p = Path('V11/V26Fixes.swift')
+          s = p.read_text()
+          s = s.replace('@State private var actionItem: LocalMedia?\n', '@State private var actionItem: LocalMedia?\n    @State private var smartItem: LocalMedia?\n', 1)
+          old = '''.swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                    Button { actionItem = item } label: {
+                                        Label("أدوات", systemImage: "ellipsis")
+                                    }
+                                    .tint(olive)
+                                }'''
+          new = '''.swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                    Button { smartItem = item } label: {
+                                        Label("ذكي", systemImage: "sparkles")
+                                    }
+                                    .tint(.indigo)
+                                    Button { actionItem = item } label: {
+                                        Label("أدوات", systemImage: "ellipsis")
+                                    }
+                                    .tint(olive)
+                                }'''
+          s = s.replace(old, new)
+          s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }\n            .sheet(item: $smartItem) { SmartToolsView(model:model,item:$0) }')
+          p.write_text(s)
+
+          # Main UI integration: quality comparison and automation hub in settings.
           p = Path('V11/Views.swift')
           s = p.read_text()
           s = s.replace('LibraryView(model:model).tabItem', 'LibraryViewV26(model:model).tabItem')
           s = s.replace('}.tint(T.olive).overlay(alignment:.top)', '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){FloatingPlaybackDock()}.overlay(alignment:.top)')
           s = s.replace('Text("نزّل. رتّب. استخدم.").font(.caption).foregroundStyle(.secondary)', 'EmptyView()')
+          s = s.replace('        TextField("اسم الملف",text:$name)', '        if model.results.count > 1 { QualityComparisonV3(model:model,items:model.results) }\n        TextField("اسم الملف",text:$name)', 1)
+          s = s.replace('Section("المساحة"){', 'Section("ميزات متقدمة"){NavigationLink{SmartAutomationHubV3(model:model)}label:{Label("الأتمتة والذكاء",systemImage:"sparkles")}};Section("المساحة"){', 1)
+          s = s.replace('}.onAppear{model.purgeExpiredTrash()}', '}.onAppear{model.purgeExpiredTrash();Task{await model.processWatchFolderV3()}}', 1)
 
           old = 'else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}'
           new = 'else{Group{if item.isVideo || item.isAudio{Button{PlaybackCenter.shared.play(item)}label:{content}.buttonStyle(.plain)}else if item.ext.lowercased()=="srt" || item.ext.lowercased()=="txt"{NavigationLink{SubtitleViewerView(item:item)}label:{content}.buttonStyle(.plain)}else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}}}'
           if old in s:
               s = s.replace(old, new, 1)
-
           s = s.replace('NavigationLink{MediaDetailView(model:model,item:i)}label:{CompactMediaRow(item:i,model:model)}', 'NavigationLink{Group{if i.ext.lowercased()=="srt" || i.ext.lowercased()=="txt"{SubtitleViewerView(item:i)}else{MediaDetailView(model:model,item:i)}}}label:{CompactMediaRow(item:i,model:model)}')
           p.write_text(s)
           PY
