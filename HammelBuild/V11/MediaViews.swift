@@ -127,23 +127,142 @@ struct MediaDetailView: View {
 struct MediaPreview: View {
     let item: LocalMedia
     @State private var player: AVPlayer?
+    @State private var isPlaying = false
+    @State private var currentTime = 0.0
+    @State private var duration = 1.0
+    @State private var observer: Any?
+    @State private var isSeeking = false
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             Color.black
+
             if (item.isImage || item.ext == "gif"), let img = UIImage(contentsOfFile: item.url.path) {
                 Image(uiImage: img).resizable().scaledToFit()
             } else if item.isVideo || item.isAudio {
-                if let player { VideoPlayer(player: player) }
-                else { ProgressView().tint(.white) }
+                if let player {
+                    if item.isVideo {
+                        VideoPlayer(player: player)
+                    } else {
+                        VStack(spacing: 14) {
+                            Image(systemName: "waveform.circle.fill")
+                                .font(.system(size: 76))
+                                .foregroundStyle(.white.opacity(0.9))
+                            Text(item.url.deletingPathExtension().lastPathComponent)
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                    }
+                } else {
+                    ProgressView().tint(.white)
+                }
             } else {
                 Image(systemName: "doc.fill").font(.system(size: 52)).foregroundStyle(.white.opacity(0.8))
             }
+
+            if item.isVideo || item.isAudio {
+                VStack(spacing: 8) {
+                    Slider(value: Binding(
+                        get: { currentTime },
+                        set: { value in
+                            currentTime = value
+                            isSeeking = true
+                        }
+                    ), in: 0...max(1, duration), onEditingChanged: { editing in
+                        if !editing, let player {
+                            player.seek(to: CMTime(seconds: currentTime, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                            isSeeking = false
+                        }
+                    })
+                    .tint(.white)
+
+                    HStack(spacing: 30) {
+                        Text(format(currentTime))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.8))
+
+                        Button { seek(by: -10) } label: {
+                            Image(systemName: "gobackward.10").font(.title2)
+                        }
+
+                        Button { togglePlay() } label: {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(.title2)
+                                .frame(width: 42, height: 42)
+                                .background(.white.opacity(0.15), in: Circle())
+                        }
+
+                        Button { seek(by: 10) } label: {
+                            Image(systemName: "goforward.10").font(.title2)
+                        }
+
+                        Text(format(duration))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(.black.opacity(0.72))
+            }
         }
         .task {
-            if item.isVideo || item.isAudio { player = AVPlayer(url: item.url) }
+            guard item.isVideo || item.isAudio else { return }
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch { }
+
+            let p = AVPlayer(url: item.url)
+            p.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+            player = p
+
+            if let d = try? await AVURLAsset(url: item.url).load(.duration).seconds, d.isFinite, d > 0 {
+                duration = d
+            }
+
+            observer = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { time in
+                guard !isSeeking else { return }
+                currentTime = max(0, time.seconds.isFinite ? time.seconds : 0)
+                isPlaying = p.timeControlStatus == .playing
+            }
         }
-        .onDisappear { player?.pause(); player = nil }
+        .onDisappear {
+            // Leaving this page intentionally stops playback; simply backgrounding the app does not.
+            if let observer, let player { player.removeTimeObserver(observer) }
+            observer = nil
+            player?.pause()
+            player = nil
+        }
+    }
+
+    private func togglePlay() {
+        guard let player else { return }
+        if player.timeControlStatus == .playing {
+            player.pause()
+            isPlaying = false
+        } else {
+            if currentTime >= duration - 0.2 { player.seek(to: .zero); currentTime = 0 }
+            player.play()
+            isPlaying = true
+        }
+    }
+
+    private func seek(by seconds: Double) {
+        guard let player else { return }
+        let next = min(duration, max(0, currentTime + seconds))
+        currentTime = next
+        player.seek(to: CMTime(seconds: next, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func format(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "00:00" }
+        let s = max(0, Int(seconds.rounded()))
+        if s >= 3600 { return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) }
+        return String(format: "%02d:%02d", s / 60, s % 60)
     }
 }
 
