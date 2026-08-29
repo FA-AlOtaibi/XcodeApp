@@ -4,7 +4,7 @@ import AVFoundation
 extension AppModel {
     func separateWithDemucs(from item: LocalMedia, keepVoice: Bool) async {
         guard item.isVideo || item.isAudio else { show("اختر فيديو أو ملف صوتي", .info); return }
-        show(keepVoice ? "جارٍ عزل الصوت البشري بالذكاء الاصطناعي…" : "جارٍ حذف الصوت البشري وإبقاء الموسيقى…", .info)
+        show(keepVoice ? "جارٍ عزل الكلام…" : "جارٍ فصل الموسيقى…", .info)
         do {
             let sourceAudio = try await demucsAudioSource(from: item)
             defer { if sourceAudio != item.url { try? FileManager.default.removeItem(at: sourceAudio) } }
@@ -24,30 +24,31 @@ extension AppModel {
             } else {
                 let needed: [Stem] = [.drums, .bass, .other]
                 let urls = needed.compactMap { vm.stemURLs[$0] }
-                guard urls.count == needed.count else { throw AppError.message("تعذر إنشاء مسار الموسيقى") }
-                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("demucs-music-\(UUID().uuidString).wav")
-                try mixDemucsStems(urls, to: tmp)
+                guard urls.count == needed.count else { throw AppError.message("تعذر إنشاء مسارات الموسيقى") }
+                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("demucs-music-\(UUID().uuidString).m4a")
+                try await mixDemucsStems(urls, to: tmp)
                 mixedMusic = tmp
                 selectedAudio = tmp
             }
             defer { if let mixedMusic { try? FileManager.default.removeItem(at: mixedMusic) } }
 
             if item.isVideo {
-                let suffix = keepVoice ? "vocals" : "music"
-                let out = FileManager.default.temporaryDirectory.appendingPathComponent("\(item.url.deletingPathExtension().lastPathComponent)-\(suffix)-AI.mp4")
+                let suffix = keepVoice ? "voice" : "music"
+                let out = FileManager.default.temporaryDirectory.appendingPathComponent("\(item.url.deletingPathExtension().lastPathComponent)-\(suffix).mp4")
                 try? FileManager.default.removeItem(at: out)
                 try await remuxVideo(item.url, audioURL: selectedAudio, output: out)
                 _ = try persist(out, out.lastPathComponent)
             } else {
-                let suffix = keepVoice ? "vocals" : "music"
-                let out = FileManager.default.temporaryDirectory.appendingPathComponent("\(item.url.deletingPathExtension().lastPathComponent)-\(suffix)-AI.wav")
+                let suffix = keepVoice ? "voice" : "music"
+                let ext = selectedAudio.pathExtension.isEmpty ? "wav" : selectedAudio.pathExtension
+                let out = FileManager.default.temporaryDirectory.appendingPathComponent("\(item.url.deletingPathExtension().lastPathComponent)-\(suffix).\(ext)")
                 try? FileManager.default.removeItem(at: out)
                 try FileManager.default.copyItem(at: selectedAudio, to: out)
                 _ = try persist(out, out.lastPathComponent)
             }
 
             refreshStorage()
-            show(keepVoice ? "تم عزل الكلام وحذف الموسيقى بالـAI" : "تم حذف الكلام وإبقاء الموسيقى بالـAI", .success)
+            show(keepVoice ? "تم إبقاء الكلام وحذف الموسيقى" : "تم إبقاء الموسيقى وحذف الكلام", .success)
         } catch {
             show(readable(error), .error)
         }
@@ -71,39 +72,40 @@ extension AppModel {
         return tmp
     }
 
-    private func mixDemucsStems(_ urls: [URL], to outputURL: URL) throws {
-        let files = try urls.map { try AVAudioFile(forReading: $0) }
-        guard let first = files.first else { throw AppError.message("لا توجد مسارات صوت") }
-        let format = first.processingFormat
-        try? FileManager.default.removeItem(at: outputURL)
-        let writer = try AVAudioFile(forWriting: outputURL, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
-        let capacity: AVAudioFrameCount = 8192
+    private func mixDemucsStems(_ urls: [URL], to outputURL: URL) async throws {
+        let composition = AVMutableComposition()
+        var params: [AVAudioMixInputParameters] = []
+        var longest = CMTime.zero
 
-        while true {
-            var buffers: [AVAudioPCMBuffer] = []
-            var maxFrames: AVAudioFrameCount = 0
-            for file in files {
-                guard let b = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { throw AppError.message("تعذر تجهيز الصوت") }
-                try file.read(into: b, frameCount: capacity)
-                maxFrames = max(maxFrames, b.frameLength)
-                buffers.append(b)
+        for url in urls {
+            let asset = AVURLAsset(url: url)
+            guard let source = try await asset.loadTracks(withMediaType: .audio).first else {
+                throw AppError.message("أحد مسارات الموسيقى غير صالح")
             }
-            if maxFrames == 0 { break }
-            guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: maxFrames), let outData = out.floatChannelData else {
-                throw AppError.message("تعذر مزج الموسيقى")
+            let duration = try await asset.load(.duration)
+            longest = CMTimeMaximum(longest, duration)
+            guard let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+                throw AppError.message("تعذر تجهيز مسار الموسيقى")
             }
-            out.frameLength = maxFrames
-            let channelCount = Int(format.channelCount)
-            for ch in 0..<channelCount {
-                for frame in 0..<Int(maxFrames) {
-                    var value: Float = 0
-                    for b in buffers where frame < Int(b.frameLength) {
-                        if let d = b.floatChannelData { value += d[ch][frame] }
-                    }
-                    outData[ch][frame] = min(1, max(-1, value))
-                }
-            }
-            try writer.write(from: out)
+            try track.insertTimeRange(CMTimeRange(start: .zero, duration: duration), of: source, at: .zero)
+            let p = AVMutableAudioMixInputParameters(track: track)
+            p.setVolume(1.0, at: .zero)
+            params.append(p)
+        }
+
+        guard longest > .zero else { throw AppError.message("مسارات الموسيقى فارغة") }
+        let mix = AVMutableAudioMix()
+        mix.inputParameters = params
+        try? FileManager.default.removeItem(at: outputURL)
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetAppleM4A) else {
+            throw AppError.message("تعذر تجهيز الموسيقى الناتجة")
+        }
+        exporter.audioMix = mix
+        exporter.outputURL = outputURL
+        exporter.outputFileType = .m4a
+        await exporter.export()
+        guard exporter.status == .completed else {
+            throw exporter.error ?? AppError.message("فشل دمج مسارات الموسيقى")
         }
     }
 
