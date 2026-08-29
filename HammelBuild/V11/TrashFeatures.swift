@@ -26,14 +26,43 @@ struct MediaQuickActionsSheet: View {
         HStack(spacing:10){LocalThumb(item:item).frame(width:48,height:44).clipShape(RoundedRectangle(cornerRadius:10));VStack(alignment:.leading,spacing:2){Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1);Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)};Spacer();Button{dismiss()}label:{Image(systemName:"xmark.circle.fill").font(.title2).foregroundStyle(.secondary)}}
         HStack(spacing:7){
             if item.isVideo{NavigationLink{MediaEditorView(sourceURL:item.url,model:model)}label:{CompactTool(title:"تعديل",icon:"slider.horizontal.3")}.buttonStyle(.plain)}
-            Menu{if item.isVideo{Button("حذف الموسيقى وإبقاء الكلام",systemImage:"mic.fill"){run{await model.separateCenterAudioFast(from:item,keepVoice:true)}};Button("حذف الكلام وإبقاء الموسيقى",systemImage:"music.note"){run{await model.separateCenterAudioFast(from:item,keepVoice:false)}};Button("استخراج الصوت",systemImage:"waveform"){run{await model.extractAudio(from:item)}}}}label:{CompactTool(title:"الصوت",icon:"waveform")}
-            Menu{if item.isVideo{Button("تحويل إلى GIF",systemImage:"photo.stack"){run{await model.videoToGIF(item)}};Button("نسخة 720p",systemImage:"arrow.down.right.and.arrow.up.left"){run{await model.compress720(from:item)}};Button("لقطة وسطية",systemImage:"photo"){run{await model.grabMiddleFrame(from:item)}};Button("لوحة 9 لقطات",systemImage:"square.grid.3x3"){run{await model.contactSheet(from:item)}}};if item.ext=="gif"{Button("GIF إلى فيديو",systemImage:"film"){run{await model.gifToVideo(item)}}};if item.isImage || item.isVideo{Button("تنظيف الخصوصية",systemImage:"shield"){run{await model.privacyCleanCopy(from:item)}}}}label:{CompactTool(title:"أدوات",icon:"wand.and.stars")}
-            Menu{if item.isImage || item.isVideo{Button("حفظ في الصور",systemImage:"photo.badge.plus"){run{await model.saveExistingToPhotos(item.url)}};Button("Snapchat",systemImage:"paperplane"){model.prepareForSnapchat(item);share=true}};ShareLink(item:item.url){Label("مشاركة للتطبيقات",systemImage:"square.and.arrow.up")}}label:{CompactTool(title:"مشاركة",icon:"square.and.arrow.up")}
+            Menu{
+                if item.isVideo{
+                    Button("حذف الموسيقى وإبقاء الكلام",systemImage:"mic.fill"){run{await model.separateCenterAudioFast(from:item,keepVoice:true)}}
+                    Button("حذف الكلام وإبقاء الموسيقى",systemImage:"music.note"){run{await model.separateCenterAudioFast(from:item,keepVoice:false)}}
+                    Button("استخراج الصوت M4A",systemImage:"waveform"){run{await model.extractAudio(from:item)}}
+                    Button("كتم صوت الفيديو",systemImage:"speaker.slash"){run{await model.muteVideo(item)}}
+                    Button("تحويل إلى نغمة رنين",systemImage:"bell.fill"){run{await model.makeRingtone(item)}}
+                    Button("تحويل إلى MP3",systemImage:"music.note.list"){model.showUnsupportedAI("تحويل MP3")}
+                } else if item.isAudio {
+                    Button("تحويل إلى نغمة رنين",systemImage:"bell.fill"){run{await model.makeRingtone(item)}}
+                }
+            }label:{CompactTool(title:"الصوت",icon:"waveform")}
+            Menu{
+                if item.isVideo{
+                    Button("تحويل إلى GIF",systemImage:"photo.stack"){run{await model.videoToGIF(item)}}
+                    Button("ضغط / نسخة 720p",systemImage:"arrow.down.right.and.arrow.up.left"){run{await model.compress720(from:item)}}
+                    Button("تدوير 90°",systemImage:"rotate.right"){run{await model.rotateVideo90(item)}}
+                    Button("لقطة وسطية",systemImage:"photo"){run{await model.grabMiddleFrame(from:item)}}
+                    Button("لوحة 9 لقطات",systemImage:"square.grid.3x3"){run{await model.contactSheet(from:item)}}
+                    Button("ترجمة الفيديو",systemImage:"captions.bubble"){model.showUnsupportedAI("ترجمة الفيديو")}
+                    Button("عكس الفيديو",systemImage:"backward.end"){model.showUnsupportedAI("عكس الفيديو")}
+                }
+                if item.ext=="gif"{Button("GIF إلى فيديو",systemImage:"film"){run{await model.gifToVideo(item)}}}
+                if item.isImage{Button("إزالة الخلفية",systemImage:"person.crop.rectangle.badge.minus"){run{await model.removeImageBackground(item)}}}
+                if item.isImage || item.isVideo{Button("تنظيف الخصوصية",systemImage:"shield"){run{await model.privacyCleanCopy(from:item)}}}
+                Button("إنشاء نسخة",systemImage:"doc.on.doc"){model.duplicateMedia(item)}
+                Button("تغيير الصيغة",systemImage:"arrow.triangle.2.circlepath"){model.showUnsupportedAI("تغيير الصيغة")}
+            }label:{CompactTool(title:"أدوات",icon:"wand.and.stars")}
+            Menu{
+                if item.isImage || item.isVideo{Button("حفظ في الصور",systemImage:"photo.badge.plus"){run{await model.saveExistingToPhotos(item.url)}};Button("Snapchat",systemImage:"paperplane"){model.prepareForSnapchat(item);share=true}}
+                ShareLink(item:item.url){Label("مشاركة للتطبيقات",systemImage:"square.and.arrow.up")}
+            }label:{CompactTool(title:"مشاركة",icon:"square.and.arrow.up")}
         }
         HStack(spacing:8){Button{model.autoRename(item);dismiss()}label:{Label("اسم مرتب",systemImage:"textformat").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(.thinMaterial,in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain);Button(role:.destructive){model.moveToTrash(item);dismiss()}label:{Label("حذف",systemImage:"trash").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(Color.red.opacity(0.10),in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain)}
         if busy{HStack(spacing:7){ProgressView();Text("جارٍ المعالجة…").font(.caption).foregroundStyle(.secondary)}}
-        Text("فصل الكلام/الموسيقى يعمل بأفضل نتيجة عندما يكون الكلام في منتصف مكس الستيريو.").font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
-    }.padding(14).navigationBarHidden(true)}.presentationDetents([.height(235),.medium]).presentationDragIndicator(.visible).sheet(isPresented:$share){ActivityShareView(items:[item.url])} }
+        Text("أدوات الفصل الصوتي الحالية محلية وسريعة؛ أفضل نتيجة عندما يكون الكلام في منتصف الستيريو.").font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+    }.padding(14).navigationBarHidden(true)}.presentationDetents([.height(250),.medium]).presentationDragIndicator(.visible).sheet(isPresented:$share){ActivityShareView(items:[item.url])} }
     private func run(_ op:@escaping()->Void){busy=true;op();DispatchQueue.main.asyncAfter(deadline:.now()+0.2){busy=false}}
     private func run(_ op:@escaping() async->Void){busy=true;Task{await op();busy=false}}
 }
