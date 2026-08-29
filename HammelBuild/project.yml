@@ -23,5 +23,6 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "يحتاج مُحمّل إلى إذن لإضافة الفيديوهات والصور التي تختار حفظها إلى مكتبة الصور."
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "يحتاج مُحمّل للوصول إلى الصور والفيديوهات التي تختار استيرادها إلى مكتبة التطبيق."
         INFOPLIST_KEY_NSCameraUsageDescription: "يستخدم مُحمّل الكاميرا فقط عندما تختار التقاط صورة لإضافتها إلى المكتبة."
+        INFOPLIST_KEY_UIBackgroundModes: "audio"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
