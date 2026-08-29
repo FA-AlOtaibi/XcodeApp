@@ -13,6 +13,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Normalize media suite source
+        working-directory: HammelBuild
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('V11/FullMediaSuite.swift')
+          s = p.read_text()
+          s = s.replace('])}private func run(', '])}; private func run(')
+          s = s.replace('])}private func crop(', '])}; private func crop(')
+          s = s.replace('}}private func format(', '}}; private func format(')
+          p.write_text(s)
+          PY
       - name: Generate Xcode project
         working-directory: HammelBuild
         run: xcodegen generate
@@ -46,4 +58,3 @@ jobs:
           name: Hammel-unsigned-IPA
           path: HammelBuild/Hammel-unsigned.ipa
           if-no-files-found: error
-# v0.4 dynamic engine failover
