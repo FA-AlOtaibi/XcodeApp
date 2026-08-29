@@ -23,13 +23,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fahad.Hammel
         PRODUCT_NAME: Hammel
-        GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: "مُحمّل"
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIBackgroundModes: "audio"
-        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: "يحتاج مُحمّل إلى إذن لإضافة الفيديوهات والصور التي تختار حفظها إلى مكتبة الصور."
-        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "يحتاج مُحمّل للوصول إلى الصور والفيديوهات التي تختار استيرادها إلى مكتبة التطبيق."
-        INFOPLIST_KEY_NSCameraUsageDescription: "يستخدم مُحمّل الكاميرا فقط عندما تختار التقاط صورة لإضافتها إلى المكتبة."
-        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "يستخدم مُحمّل التعرف على الكلام لإنشاء ترجمة ونصوص من الفيديوهات التي تختارها فقط."
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: V11/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
