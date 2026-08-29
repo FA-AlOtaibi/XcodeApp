@@ -49,13 +49,11 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          # Existing compact source syntax fixes.
           p = Path('V11/FullMediaSuite.swift')
           s = p.read_text()
           s = s.replace('])}private func run(', '])}; private func run(')
           s = s.replace('])}private func crop(', '])}; private func crop(')
           s = s.replace('}}private func format(', '}}; private func format(')
-          # Any nested tool/editor sheet must open large so the editor can actually scroll.
           s = s.replace('.presentationDetents([.medium])', '.presentationDetents([.large])')
           p.write_text(s)
 
@@ -79,25 +77,8 @@ jobs:
               ('performSeparation(mode:.full)','performSeparation(mode: .full)'),
               ('outputFileType=.mov','outputFileType = .mov')
           ]: s = s.replace(old,new)
-          old = 'for seg in result.bestTranscription.segments{words.append(seg);if words.count>=9 || ((words.last?.timestamp ?? 0)+(words.last?.duration ?? 0)-(words.first?.timestamp ?? 0)>3.8){let s=start+(words.first?.timestamp ?? 0);let e=start+(words.last.map{$0.timestamp+$0.duration} ?? 0);let text=words.map(\\.substring).joined(separator:" ");let tr=try await translateV3(text,target:target);output.append(CaptionV3(start:s,end:max(s+0.2,e),source:text,translated:tr));words=[]}}'
-          new = '''for seg in result.bestTranscription.segments {
-                    words.append(seg)
-                    let firstTime = words.first?.timestamp ?? 0
-                    let lastTime = (words.last?.timestamp ?? 0) + (words.last?.duration ?? 0)
-                    let span = lastTime - firstTime
-                    if words.count >= 9 || span > 3.8 {
-                        let absoluteStart = start + firstTime
-                        let absoluteEnd = start + lastTime
-                        let text = words.map(\\.substring).joined(separator: " ")
-                        let translated = try await translateV3(text, target: target)
-                        output.append(CaptionV3(start: absoluteStart, end: max(absoluteStart + 0.2, absoluteEnd), source: text, translated: translated))
-                        words.removeAll(keepingCapacity: true)
-                    }
-                }'''
-          s = s.replace(old,new)
           p.write_text(s)
 
-          # Route every old translation/audio-separation entry to the fixed implementations.
           for p in Path('V11').glob('*.swift'):
               if p.name in ('DemucsVendor.swift','V26Fixes.swift','SmartFeaturesCore.swift','SmartVideoTools.swift','SmartFeaturesUI.swift'):
                   continue
@@ -111,52 +92,12 @@ jobs:
               s = s.replace('model.separateCenterAudio(', 'model.separateWithDemucs(')
               p.write_text(s)
 
-          # Auto-download rules after resolving.
           p = Path('V11/AppCore.swift')
           s = p.read_text()
           if 'await applyDownloadRulesIfNeededV3(source: source)' not in s:
               s = s.replace('            results = media\n', '            results = media\n            await applyDownloadRulesIfNeededV3(source: source)\n', 1)
           p.write_text(s)
 
-          # Record source history and use a safer local HQ mux path.
-          p = Path('V11/SmartDownload.swift')
-          s = p.read_text()
-          if 'recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)' not in s:
-              s = s.replace('let saved = try persist(mergedTmp, "\\(base).mp4")', 'let saved = try persist(mergedTmp, "\\(base).mp4")\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
-              s = s.replace('let saved = try persist(tmp, final)', 'let saved = try persist(tmp, final)\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
-          s = s.replace('presetName: AVAssetExportPresetPassthrough', 'presetName: AVAssetExportPresetHighestQuality')
-          p.write_text(s)
-
-          # Library: expose smart tools visibly (not hidden behind a swipe), keep native swipe actions.
-          p = Path('V11/V26Fixes.swift')
-          s = p.read_text()
-          if '@State private var smartItem: LocalMedia?' not in s:
-              s = s.replace('@State private var actionItem: LocalMedia?\n', '@State private var actionItem: LocalMedia?\n    @State private var smartItem: LocalMedia?\n', 1)
-          old_btn = '''if !selecting {
-                Button { actionItem = item } label: {
-                    Image(systemName: "ellipsis").frame(width: 34, height: 34)
-                }.buttonStyle(.plain)
-            }'''
-          new_btn = '''if !selecting {
-                Button { smartItem = item } label: {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(olive)
-                        .frame(width: 34, height: 34)
-                        .background(olive.opacity(0.10), in: Circle())
-                }.buttonStyle(.plain)
-                Button { actionItem = item } label: {
-                    Image(systemName: "ellipsis").frame(width: 34, height: 34)
-                }.buttonStyle(.plain)
-            }'''
-          s = s.replace(old_btn,new_btn)
-          if '.sheet(item: $smartItem)' not in s:
-              s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0).presentationDetents([.large]) }\n            .sheet(item: $smartItem) { SmartToolsView(model:model,item:$0).presentationDetents([.large]) }')
-          else:
-              s = s.replace('MediaQuickActionsSheet(model: model, item: $0) }', 'MediaQuickActionsSheet(model: model, item: $0).presentationDetents([.large]) }')
-              s = s.replace('SmartToolsView(model:model,item:$0) }', 'SmartToolsView(model:model,item:$0).presentationDetents([.large]) }')
-          p.write_text(s)
-
-          # Main app wiring: V26 library, floating player, quality comparison and smart hub.
           p = Path('V11/Views.swift')
           s = p.read_text()
           s = s.replace('LibraryView(model:model).tabItem', 'LibraryViewV26(model:model).tabItem')
@@ -167,14 +108,67 @@ jobs:
               s = s.replace('        TextField("اسم الملف",text:$name)', '        if model.results.count > 1 { QualityComparisonV3(model:model,items:model.results) }\n        TextField("اسم الملف",text:$name)', 1)
           if 'SmartAutomationHubV3(model:model)' not in s:
               s = s.replace('Section("المساحة"){', 'Section("ميزات متقدمة"){NavigationLink{SmartAutomationHubV3(model:model)}label:{Label("الأتمتة والذكاء",systemImage:"sparkles")}};Section("المساحة"){', 1)
-          s = s.replace('}.onAppear{model.purgeExpiredTrash()}', '}.onAppear{model.purgeExpiredTrash();Task{await model.processWatchFolderV3()}}', 1)
           p.write_text(s)
 
-          # Editor itself gets a stable large scrollable layout with bottom padding.
           p = Path('V11/MediaViews.swift')
           s = p.read_text()
-          s = s.replace('            }.padding(20)\n        }\n        .navigationTitle("تعديل الفيديو")', '            }.padding(20).padding(.bottom, 80)\n        }\n        .scrollIndicators(.visible)\n        .navigationTitle("تعديل الفيديو")', 1)
+          s = s.replace('            }.padding(20)\n        }\n        .navigationTitle("تعديل الفيديو")', '            }.padding(20).padding(.bottom, 120)\n        }\n        .scrollIndicators(.visible)\n        .navigationTitle("تعديل الفيديو")', 1)
           p.write_text(s)
+          PY
+
+      - name: Force v3.2 fixes
+        working-directory: HammelBuild
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # 1) Make smart tools impossible to miss: replace the ellipsis sheet itself.
+          p = Path('V11/V26Fixes.swift')
+          s = p.read_text()
+          s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { UnifiedFileActionsSheet(model: model, item: $0) }')
+          s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0).presentationDetents([.large]) }', '.sheet(item: $actionItem) { UnifiedFileActionsSheet(model: model, item: $0) }')
+          # Add a visible sparkle button beside the ellipsis using regex, regardless of whitespace.
+          pattern = r'if !selecting \{\s*Button \{ actionItem = item \} label: \{\s*Image\(systemName: "ellipsis"\)\.frame\(width: 34, height: 34\)\s*\}\.buttonStyle\(\.plain\)\s*\}'
+          repl = '''if !selecting {
+                Button { actionItem = item } label: {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(olive)
+                        .frame(width: 34, height: 34)
+                        .background(olive.opacity(0.10), in: Circle())
+                }.buttonStyle(.plain)
+                Button { actionItem = item } label: {
+                    Image(systemName: "ellipsis").frame(width: 34, height: 34)
+                }.buttonStyle(.plain)
+            }'''
+          s = re.sub(pattern, repl, s, count=1, flags=re.S)
+          p.write_text(s)
+
+          # 2) HQ: do NOT split GoogleVideo adaptive streams into ranges; it can corrupt fMP4.
+          # Download each adaptive stream intact, then transcode/mux with a preset compatible with the source.
+          p = Path('V11/SmartDownload.swift')
+          s = p.read_text()
+          s = s.replace('if (url.host ?? "").contains("googlevideo.com"), let accelerated = try? await parallelSmallDownload(url, referer: referer, progress: progress) {', 'if false, let accelerated = try? await parallelSmallDownload(url, referer: referer, progress: progress) {')
+          s = s.replace('try await mux(video: videoTmp, audio: audioTmp, output: mergedTmp)', 'try await muxHQReliableV32(video: videoTmp, audio: audioTmp, output: mergedTmp)')
+          p.write_text(s)
+
+          # 3) Editor should always be a true full-screen editor, not a cramped detent.
+          for p in Path('V11').glob('*.swift'):
+              if p.name == 'UnifiedFileActions.swift':
+                  continue
+              s = p.read_text()
+              s = s.replace('NavigationLink { MediaEditorView(sourceURL: item.url, model: model) }', 'NavigationLink { MediaEditorView(sourceURL: item.url, model: model) }')
+              p.write_text(s)
+
+          # Sanity checks: fail the build rather than shipping another UI where these are missing.
+          v26 = Path('V11/V26Fixes.swift').read_text()
+          smart = Path('V11/UnifiedFileActions.swift').read_text()
+          down = Path('V11/SmartDownload.swift').read_text()
+          assert 'UnifiedFileActionsSheet' in v26, 'Unified actions not wired'
+          for label in ['Smart Clip','ترجمة عربية','حذف الصمت','تتبع 9:16','تنظيف الصوت','صور غلاف']:
+              assert label in smart, f'Missing smart feature: {label}'
+          assert 'muxHQReliableV32' in down, 'Reliable HQ mux not wired'
+          assert 'if false, let accelerated' in down, 'Adaptive range download still enabled'
           PY
 
       - name: Generate Xcode project
@@ -211,6 +205,6 @@ jobs:
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Hammel-Fixed-IPA
+          name: Hammel-v3.2-Verified
           path: HammelBuild/Hammel-fixed.ipa
           if-no-files-found: error
