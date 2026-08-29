@@ -40,7 +40,6 @@ struct HomeView: View {
                         VStack(alignment: .leading, spacing: 2) { Text("مُحمّل").font(.system(size: 39, weight: .bold, design: .rounded)); Text("نزّل. رتّب. عدّل.").font(.caption).foregroundStyle(.secondary) }
                         Spacer(); Image(systemName: "arrow.down").font(.title2.bold()).foregroundStyle(T.olive).frame(width: 52, height: 52).background(T.olive.opacity(0.11), in: RoundedRectangle(cornerRadius: 17))
                     }.padding(.top, 10)
-
                     VStack(spacing: 12) {
                         HStack(spacing: 12) {
                             TextField("ألصق رابطًا", text: $model.input).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -48,16 +47,10 @@ struct HomeView: View {
                         }.padding(17).background(T.olive.opacity(0.10), in: RoundedRectangle(cornerRadius: 22))
                         HStack(spacing: 10) {
                             Button { model.input = UIPasteboard.general.string ?? "" } label: { Label("لصق", systemImage: "doc.on.clipboard").frame(maxWidth: .infinity).padding(.vertical, 14).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18)) }
-                            Button {
-                                Task { await model.resolve(); if !model.results.isEmpty { showDetails = true } }
-                            } label: {
-                                HStack { if model.isResolving { ProgressView().tint(.white) }; Text(model.isResolving ? "تحليل…" : "متابعة").fontWeight(.semibold); Image(systemName: "arrow.left") }.frame(maxWidth: .infinity).padding(.vertical, 14).foregroundStyle(.white).background(T.olive, in: RoundedRectangle(cornerRadius: 18))
-                            }.disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isResolving)
+                            Button { Task { await model.resolve(); if !model.results.isEmpty { showDetails = true } } } label: { HStack { if model.isResolving { ProgressView().tint(.white) }; Text(model.isResolving ? "تحليل…" : "متابعة").fontWeight(.semibold); Image(systemName: "arrow.left") }.frame(maxWidth: .infinity).padding(.vertical, 14).foregroundStyle(.white).background(T.olive, in: RoundedRectangle(cornerRadius: 18)) }.disabled(model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isResolving)
                         }
                     }
-
                     PlatformStrip()
-
                     if !model.library.isEmpty {
                         VStack(alignment: .leading, spacing: 11) {
                             HStack { Text("الأخيرة").font(.headline); Spacer(); Text("\(model.library.count) ملف").font(.caption).foregroundStyle(.secondary) }
@@ -88,7 +81,7 @@ struct ResolveDetailsView: View {
                 }
                 if model.results.count > 1 {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(model.results.first?.platform == .youtube ? "اختر الجودة" : "اختر العنصر").font(.headline)
+                        HStack { Text(model.results.first?.platform == .youtube ? "اختر الجودة" : "اختر العنصر").font(.headline); Spacer(); if model.results.first?.platform == .youtube { Text("حتى أعلى جودة متاحة").font(.caption2).foregroundStyle(.secondary) } }
                         ForEach(model.results) { media in
                             Button { selected = media; name = (media.filename as NSString).deletingPathExtension } label: {
                                 HStack { VStack(alignment: .leading, spacing: 3) { Text(media.quality).fontWeight(.semibold); if let size = media.estimatedSize { Text(model.formattedBytes(size)).font(.caption2).foregroundStyle(.secondary) } }; Spacer(); if selected?.id == media.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(T.olive) } }.padding(13).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -100,9 +93,9 @@ struct ResolveDetailsView: View {
                     TextField("اسم الملف", text: $name).padding(14).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
                     Picker("الحفظ", selection: $save) { Text("المكتبة").tag(SaveTarget.app); Text("الصور").tag(SaveTarget.photos) }.pickerStyle(.segmented)
                 }
-                Button { guard let item = selected ?? model.results.first else { return }; Task { await model.enqueue(item, filename: name.isEmpty ? nil : name, target: save) } } label: { Label("بدء التحميل", systemImage: "arrow.down.to.line").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white).background(T.olive, in: RoundedRectangle(cornerRadius: 20)) }
+                Button { guard let item = selected ?? model.results.first else { return }; Task { await model.enqueueSmart(item, filename: name.isEmpty ? nil : name, target: save) } } label: { Label("بدء التحميل", systemImage: "arrow.down.to.line").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white).background(T.olive, in: RoundedRectangle(cornerRadius: 20)) }
                 if model.results.count > 1 && model.results.first?.platform != .youtube {
-                    Button { Task { for (i,m) in model.results.enumerated() { await model.enqueue(m, filename: "media-\(i+1)", target: save) } } } label: { Text("تحميل الكل").frame(maxWidth: .infinity).padding(14).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18)) }
+                    Button { Task { for (i,m) in model.results.enumerated() { await model.enqueueSmart(m, filename: "media-\(i+1)", target: save) } } } label: { Text("تحميل الكل").frame(maxWidth: .infinity).padding(14).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18)) }
                 }
             }.padding(20)
         }.navigationTitle("التفاصيل").navigationBarTitleDisplayMode(.inline).onAppear { selected = model.results.first; name = model.results.first.map { ($0.filename as NSString).deletingPathExtension } ?? ""; save = model.saveTarget == .ask ? .app : model.saveTarget }
@@ -144,6 +137,6 @@ struct SettingsView: View {
         Section("المظهر") { Picker("الوضع",selection:Binding(get:{model.appearance},set:model.setAppearance)){ForEach(AppearanceMode.allCases){Text($0.rawValue).tag($0)}}.pickerStyle(.segmented) }
         Section("الحفظ") { Picker("المكان الافتراضي",selection:Binding(get:{model.saveTarget},set:model.setSaveTarget)){ForEach(SaveTarget.allCases){Text($0.rawValue).tag($0)}} }
         Section("المساحة") { LabeledContent("المكتبة",value:model.formattedBytes(model.libraryBytes));LabeledContent("الكاش",value:model.formattedBytes(model.cacheBytes));Button("حذف الكاش"){model.clearCache()};Button("حذف الملفات الأقدم من 30 يومًا"){model.deleteOlderThan30Days()};Button("حذف الملفات المكررة"){model.removeDuplicates()};Button("حذف جميع ملفات التطبيق",role:.destructive){confirmAll=true} }
-        Section("حول") { Text("مُحمّل 1.3 • المعمل يعمل محليًا على الجهاز").foregroundStyle(.secondary) }
+        Section("حول") { Text("مُحمّل 1.4 • تحويل GIF • معالجة صوت • جودة YouTube عالية").foregroundStyle(.secondary) }
     }.navigationTitle("الإعدادات").onAppear{model.refreshStorage()}.confirmationDialog("حذف جميع الملفات؟",isPresented:$confirmAll){Button("حذف الكل",role:.destructive){model.deleteAllAppFiles()}} } }
 }
