@@ -44,7 +44,6 @@ extension AppModel {
         let thumb = ((details?["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]])?.compactMap { ($0["url"] as? String).flatMap(URL.init(string:)) }.last
         var output: [DownloadMedia] = []
 
-        // Progressive: video + audio in one file. Usually <= 720p and safest.
         for f in streaming["formats"] as? [[String: Any]] ?? [] {
             guard let direct = f["url"] as? String, let url = URL(string: direct) else { continue }
             let mime = (f["mimeType"] as? String ?? "").lowercased()
@@ -53,20 +52,31 @@ extension AppModel {
             output.append(DownloadMedia(url: url, filename: "\(title)-\(q).mp4", type: "video", thumb: thumb, referer: "https://www.youtube.com/", platform: .youtube, quality: q, estimatedSize: ytInt64V2(f["contentLength"]), hasAudio: true))
         }
 
-        // Adaptive: pair a high-resolution MP4 video-only stream with the best MP4 audio stream.
-        // enqueueSmart() downloads both and muxes them locally on the iPhone.
         let adaptive = streaming["adaptiveFormats"] as? [[String: Any]] ?? []
-        let audioCandidates = adaptive.compactMap { f -> (URL, Int64?, Int)? in
+        let audioCandidates = adaptive.compactMap { f -> (URL, Int64?, Int, Int)? in
             guard let direct = f["url"] as? String, let url = URL(string: direct) else { return nil }
             let mime = (f["mimeType"] as? String ?? "").lowercased()
             guard mime.contains("audio/mp4") else { return nil }
             let bitrate = f["bitrate"] as? Int ?? 0
-            return (url, ytInt64V2(f["contentLength"]), bitrate)
+            let codecScore = mime.contains("mp4a.40.2") ? 3 : (mime.contains("mp4a") ? 2 : 1)
+            return (url, ytInt64V2(f["contentLength"]), bitrate, codecScore)
         }
-        let bestAudio = audioCandidates.max { $0.2 < $1.2 }
+        let bestAudio = audioCandidates.max { lhs, rhs in
+            if lhs.3 != rhs.3 { return lhs.3 < rhs.3 }
+            return lhs.2 < rhs.2
+        }
 
         if let bestAudio {
-            for f in adaptive {
+            let videos = adaptive.sorted { a, b in
+                let ma = (a["mimeType"] as? String ?? "").lowercased()
+                let mb = (b["mimeType"] as? String ?? "").lowercased()
+                let pa = ytVideoCodecPriorityV2(ma)
+                let pb = ytVideoCodecPriorityV2(mb)
+                if pa != pb { return pa > pb }
+                return (a["bitrate"] as? Int ?? 0) > (b["bitrate"] as? Int ?? 0)
+            }
+
+            for f in videos {
                 guard let direct = f["url"] as? String, let videoURL = URL(string: direct) else { continue }
                 let mime = (f["mimeType"] as? String ?? "").lowercased()
                 guard mime.contains("video/mp4"), let q = f["qualityLabel"] as? String else { continue }
@@ -74,21 +84,41 @@ extension AppModel {
                 guard height >= 720 else { continue }
                 let videoSize = ytInt64V2(f["contentLength"])
                 let total = (videoSize ?? 0) + (bestAudio.1 ?? 0)
-                let media = DownloadMedia(url: videoURL, filename: "\(title)-\(q).mp4", type: "video", thumb: thumb, referer: "https://www.youtube.com/", platform: .youtube, quality: q + (height >= 1080 ? " • HQ" : ""), estimatedSize: total > 0 ? total : nil, hasAudio: false)
+                let codec = mime.contains("avc1") ? "H.264" : (mime.contains("hvc1") || mime.contains("hev1") ? "HEVC" : (mime.contains("av01") ? "AV1" : "MP4"))
+                let label = q + (height >= 1080 ? " • HQ • \(codec)" : " • \(codec)")
+                let media = DownloadMedia(url: videoURL, filename: "\(title)-\(q).mp4", type: "video", thumb: thumb, referer: "https://www.youtube.com/", platform: .youtube, quality: label, estimatedSize: total > 0 ? total : nil, hasAudio: false)
                 YTCompanionStore.shared.setAudio(bestAudio.0, for: videoURL)
                 output.append(media)
             }
         }
 
-        // Remove duplicate quality rows and prefer adaptive HQ for equal resolution.
         var byQuality: [Int: DownloadMedia] = [:]
         for item in output {
             let n = ytQualityNumberV2(item.quality)
             if let old = byQuality[n] {
-                if !item.hasAudio && old.hasAudio { byQuality[n] = item }
-            } else { byQuality[n] = item }
+                let newScore = ytMediaPriorityV2(item)
+                let oldScore = ytMediaPriorityV2(old)
+                if newScore > oldScore { byQuality[n] = item }
+            } else {
+                byQuality[n] = item
+            }
         }
         return byQuality.values.sorted { ytQualityNumberV2($0.quality) > ytQualityNumberV2($1.quality) }.prefix(8).map { $0 }
+    }
+
+    private func ytVideoCodecPriorityV2(_ mime: String) -> Int {
+        if mime.contains("avc1") { return 4 }
+        if mime.contains("hvc1") || mime.contains("hev1") { return 3 }
+        if mime.contains("av01") { return 2 }
+        return 1
+    }
+
+    private func ytMediaPriorityV2(_ item: DownloadMedia) -> Int {
+        if item.quality.contains("H.264") { return 50 }
+        if item.quality.contains("HEVC") { return 40 }
+        if item.hasAudio { return 30 }
+        if item.quality.contains("AV1") { return 20 }
+        return 10
     }
 
     private func youtubeVideoIDV2(_ url: URL) -> String? {
@@ -100,7 +130,7 @@ extension AppModel {
         return nil
     }
 
-    private func ytQualityNumberV2(_ text: String) -> Int { Int(text.filter(\.isNumber)) ?? 0 }
+    private func ytQualityNumberV2(_ text: String) -> Int { Int(text.prefix { $0.isNumber }) ?? Int(text.filter(\.isNumber).prefix(4)) ?? 0 }
     private func ytInt64V2(_ value: Any?) -> Int64? { if let s = value as? String { return Int64(s) }; if let n = value as? NSNumber { return n.int64Value }; return nil }
 }
 
