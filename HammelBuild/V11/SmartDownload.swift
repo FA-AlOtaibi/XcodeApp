@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 
 @MainActor
 final class YTCompanionStore {
@@ -9,68 +10,15 @@ final class YTCompanionStore {
     func audio(for video: URL) -> URL? { audioByVideo[video.absoluteString] }
 }
 
-private final class ProgressFileDownloader: NSObject, URLSessionDownloadDelegate {
-    private var continuation: CheckedContinuation<URL, Error>?
-    private let progress: (Double) -> Void
-    private var session: URLSession?
-
-    init(progress: @escaping (Double) -> Void) {
-        self.progress = progress
-        super.init()
-    }
-
-    func download(_ request: URLRequest) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            let configuration = URLSessionConfiguration.default
-            configuration.timeoutIntervalForRequest = request.timeoutInterval
-            configuration.timeoutIntervalForResource = max(request.timeoutInterval, 300)
-            configuration.httpMaximumConnectionsPerHost = 8
-            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-            configuration.waitsForConnectivity = false
-            let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-            self.session = session
-            session.downloadTask(with: request).resume()
-        }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        progress(min(1, max(0, Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))))
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        let ext = downloadTask.response?.suggestedFilename.flatMap { ($0 as NSString).pathExtension }.flatMap { $0.isEmpty ? nil : $0 } ?? "part"
-        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("download-\(UUID().uuidString).\(ext)")
-        do {
-            try? FileManager.default.removeItem(at: destination)
-            try FileManager.default.moveItem(at: location, to: destination)
-            continuation?.resume(returning: destination)
-            continuation = nil
-        } catch {
-            continuation?.resume(throwing: error)
-            continuation = nil
-        }
-        session.finishTasksAndInvalidate()
-        self.session = nil
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error, continuation != nil {
-            continuation?.resume(throwing: error)
-            continuation = nil
-            session.invalidateAndCancel()
-            self.session = nil
-        }
-    }
-}
-
 extension AppModel {
     func enqueueSmart(_ item: DownloadMedia, filename: String? = nil, target: SaveTarget? = nil) async {
         if jobs.contains(where: { $0.item.url == item.url && ($0.state == .downloading || $0.state == .waiting) }) {
             notice = Notice(text: "هذا الملف قيد التحميل بالفعل", style: .info)
             return
         }
+
+        let bgTask = beginHammelBackgroundTask("تنزيل الوسائط")
+        defer { endHammelBackgroundTask(bgTask) }
 
         let chosen = target ?? saveTarget
         guard chosen != .ask else { return }
@@ -149,21 +97,24 @@ extension AppModel {
     }
 
     private func smartDownload(_ url: URL, referer: String?, progress: @escaping (Double) -> Void) async throws -> URL {
+        // Keep the accelerated path for small GoogleVideo files while the OS gives us background execution time.
         if (url.host ?? "").contains("googlevideo.com"), let accelerated = try? await parallelSmallDownload(url, referer: referer, progress: progress) {
             return accelerated
         }
+
         var req = URLRequest(url: url)
         req.timeoutInterval = 180
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
         req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let referer { req.setValue(referer, forHTTPHeaderField: "Referer") }
-        let downloader = ProgressFileDownloader(progress: progress)
-        return try await downloader.download(req)
+
+        // A background URLSession continues the network transfer after the app leaves the foreground.
+        return try await BackgroundDownloadBroker.shared.download(req, progress: progress)
     }
 
     private func parallelSmallDownload(_ url: URL, referer: String?, progress: @escaping (Double) -> Void) async throws -> URL {
         var probe = URLRequest(url: url)
-        probe.timeoutInterval = 20
+        probe.timeoutInterval = 15
         probe.setValue(ua, forHTTPHeaderField: "User-Agent")
         probe.setValue("bytes=0-0", forHTTPHeaderField: "Range")
         probe.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
@@ -174,16 +125,17 @@ extension AppModel {
               let contentRange = http.value(forHTTPHeaderField: "Content-Range"),
               let slash = contentRange.lastIndex(of: "/"),
               let total = Int64(contentRange[contentRange.index(after: slash)...]),
-              total >= 1_000_000,
-              total <= 80_000_000 else { throw URLError(.cannotParseResponse) }
+              total >= 500_000,
+              total <= 120_000_000 else { throw URLError(.cannotParseResponse) }
 
-        let parts = total < 8_000_000 ? 3 : 4
+        let parts = total < 6_000_000 ? 4 : (total < 30_000_000 ? 6 : 8)
         let chunk = Int64(ceil(Double(total) / Double(parts)))
         let config = URLSessionConfiguration.default
-        config.httpMaximumConnectionsPerHost = 8
-        config.timeoutIntervalForRequest = 90
-        config.timeoutIntervalForResource = 180
+        config.httpMaximumConnectionsPerHost = 10
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 150
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
         let session = URLSession(configuration: config)
 
         var results = Array<Data?>(repeating: nil, count: parts)
@@ -193,7 +145,7 @@ extension AppModel {
                 let end = min(total - 1, start + chunk - 1)
                 group.addTask {
                     var req = URLRequest(url: url)
-                    req.timeoutInterval = 90
+                    req.timeoutInterval = 60
                     req.setValue(self.ua, forHTTPHeaderField: "User-Agent")
                     req.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
                     req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
