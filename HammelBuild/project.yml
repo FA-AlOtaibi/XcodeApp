@@ -6,7 +6,7 @@ options:
 packages:
   SwiftMP3:
     url: https://github.com/mierau/swift-mp3.git
-    from: 1.0.0
+    branch: main
 settings:
   base:
     SWIFT_VERSION: 5.10
