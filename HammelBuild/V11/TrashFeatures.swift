@@ -2,260 +2,40 @@ import SwiftUI
 import Foundation
 
 extension AppModel {
-    func trashFolder() -> URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Hammel-Trash", isDirectory: true)
-    }
-
-    func moveToTrash(_ item: LocalMedia) {
-        do {
-            let fm = FileManager.default
-            let folder = trashFolder()
-            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            let stamp = Int(Date().timeIntervalSince1970)
-            let safe = item.url.lastPathComponent.replacingOccurrences(of: "__", with: "_")
-            var dst = folder.appendingPathComponent("trash-\(stamp)__\(safe)")
-            var n = 2
-            while fm.fileExists(atPath: dst.path) {
-                dst = folder.appendingPathComponent("trash-\(stamp)-\(n)__\(safe)")
-                n += 1
-            }
-            try fm.moveItem(at: item.url, to: dst)
-            favoritePaths.remove(item.url.path)
-            UserDefaults.standard.set(Array(favoritePaths), forKey: "favorites")
-            refreshStorage()
-            show("نُقل إلى سلة المهملات", .success)
-        } catch { show("تعذر نقل الملف إلى السلة", .error) }
-    }
-
-    func trashItems() -> [LocalMedia] {
-        purgeExpiredTrash()
-        let fm = FileManager.default
-        let folder = trashFolder()
-        try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
-        let urls = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey, .fileSizeKey])) ?? []
-        return urls.filter { !$0.hasDirectoryPath }.map {
-            let v = try? $0.resourceValues(forKeys: [.creationDateKey, .fileSizeKey])
-            return LocalMedia(url: $0, createdAt: v?.creationDate ?? .distantPast, size: Int64(v?.fileSize ?? 0))
-        }.sorted { deletionDate(for: $0.url) > deletionDate(for: $1.url) }
-    }
-
-    func restoreFromTrash(_ item: LocalMedia) {
-        do {
-            let original = originalTrashName(item.url)
-            let folder = mediaFolder()
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            var dst = folder.appendingPathComponent(original)
-            var n = 2
-            while FileManager.default.fileExists(atPath: dst.path) {
-                let base = (original as NSString).deletingPathExtension
-                let ext = (original as NSString).pathExtension
-                dst = folder.appendingPathComponent(ext.isEmpty ? "\(base)-\(n)" : "\(base)-\(n).\(ext)")
-                n += 1
-            }
-            try FileManager.default.moveItem(at: item.url, to: dst)
-            refreshStorage(); show("تم استرجاع الملف", .success)
-        } catch { show("تعذر استرجاع الملف", .error) }
-    }
-
-    func deleteTrashPermanently(_ item: LocalMedia) {
-        try? FileManager.default.removeItem(at: item.url)
-        show("تم الحذف نهائيًا", .success)
-    }
-
-    func emptyTrash() {
-        let fm = FileManager.default
-        let folder = trashFolder()
-        if let urls = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
-            urls.forEach { try? fm.removeItem(at: $0) }
-        }
-        show("تم إفراغ سلة المهملات", .success)
-    }
-
-    func purgeExpiredTrash() {
-        let fm = FileManager.default
-        let folder = trashFolder()
-        guard let urls = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
-        let cutoff = Date().addingTimeInterval(-15 * 86400)
-        for url in urls where deletionDate(for: url) < cutoff { try? fm.removeItem(at: url) }
-    }
-
-    func trashRemainingText(_ item: LocalMedia) -> String {
-        let age = Date().timeIntervalSince(deletionDate(for: item.url))
-        let days = max(0, 15 - Int(age / 86400))
-        return days == 0 ? "سيُحذف قريبًا" : "يبقى \(days) يوم"
-    }
-
-    private func deletionDate(for url: URL) -> Date {
-        let name = url.lastPathComponent
-        guard name.hasPrefix("trash-"), let marker = name.range(of: "__") else {
-            return (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
-        }
-        let raw = String(name[name.index(name.startIndex, offsetBy: 6)..<marker.lowerBound])
-        let epochPart = raw.split(separator: "-").first.flatMap { Double($0) } ?? Date().timeIntervalSince1970
-        return Date(timeIntervalSince1970: epochPart)
-    }
-
-    private func originalTrashName(_ url: URL) -> String {
-        let name = url.lastPathComponent
-        guard let marker = name.range(of: "__") else { return name }
-        return String(name[marker.upperBound...])
-    }
+    func trashFolder() -> URL { FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("Hammel-Trash",isDirectory:true) }
+    func moveToTrash(_ item:LocalMedia){do{let fm=FileManager.default;let f=trashFolder();try fm.createDirectory(at:f,withIntermediateDirectories:true);let stamp=Int(Date().timeIntervalSince1970);let safe=item.url.lastPathComponent.replacingOccurrences(of:"__",with:"_");var dst=f.appendingPathComponent("trash-\(stamp)__\(safe)");var n=2;while fm.fileExists(atPath:dst.path){dst=f.appendingPathComponent("trash-\(stamp)-\(n)__\(safe)");n += 1};try fm.moveItem(at:item.url,to:dst);favoritePaths.remove(item.url.path);UserDefaults.standard.set(Array(favoritePaths),forKey:"favorites");refreshStorage();show("نُقل إلى سلة المهملات",.success)}catch{show("تعذر نقل الملف إلى السلة",.error)}}
+    func trashItems()->[LocalMedia]{purgeExpiredTrash();let fm=FileManager.default;let f=trashFolder();try? fm.createDirectory(at:f,withIntermediateDirectories:true);let urls=(try? fm.contentsOfDirectory(at:f,includingPropertiesForKeys:[.creationDateKey,.fileSizeKey])) ?? [];return urls.filter{!$0.hasDirectoryPath}.map{let v=try? $0.resourceValues(forKeys:[.creationDateKey,.fileSizeKey]);return LocalMedia(url:$0,createdAt:v?.creationDate ?? .distantPast,size:Int64(v?.fileSize ?? 0))}.sorted{deletionDate(for:$0.url)>deletionDate(for:$1.url)}}
+    func restoreFromTrash(_ item:LocalMedia){do{let name=originalTrashName(item.url);let f=mediaFolder();try FileManager.default.createDirectory(at:f,withIntermediateDirectories:true);var dst=f.appendingPathComponent(name);var n=2;while FileManager.default.fileExists(atPath:dst.path){let b=(name as NSString).deletingPathExtension,e=(name as NSString).pathExtension;dst=f.appendingPathComponent(e.isEmpty ? "\(b)-\(n)":"\(b)-\(n).\(e)");n += 1};try FileManager.default.moveItem(at:item.url,to:dst);refreshStorage();show("تم استرجاع الملف",.success)}catch{show("تعذر استرجاع الملف",.error)}}
+    func deleteTrashPermanently(_ item:LocalMedia){try? FileManager.default.removeItem(at:item.url);show("تم الحذف نهائيًا",.success)}
+    func emptyTrash(){let fm=FileManager.default;let f=trashFolder();if let u=try? fm.contentsOfDirectory(at:f,includingPropertiesForKeys:nil){u.forEach{try? fm.removeItem(at:$0)}};show("تم إفراغ سلة المهملات",.success)}
+    func purgeExpiredTrash(){let fm=FileManager.default;let f=trashFolder();guard let u=try? fm.contentsOfDirectory(at:f,includingPropertiesForKeys:nil)else{return};let cutoff=Date().addingTimeInterval(-15*86400);for x in u where deletionDate(for:x)<cutoff{try? fm.removeItem(at:x)}}
+    func trashRemainingText(_ item:LocalMedia)->String{let age=Date().timeIntervalSince(deletionDate(for:item.url));let d=max(0,15-Int(age/86400));return d==0 ? "سيُحذف قريبًا":"يبقى \(d) يوم"}
+    private func deletionDate(for url:URL)->Date{let n=url.lastPathComponent;guard n.hasPrefix("trash-"),let m=n.range(of:"__")else{return (try? url.resourceValues(forKeys:[.creationDateKey]).creationDate) ?? Date()};let raw=String(n[n.index(n.startIndex,offsetBy:6)..<m.lowerBound]);let ep=raw.split(separator:"-").first.flatMap{Double($0)} ?? Date().timeIntervalSince1970;return Date(timeIntervalSince1970:ep)}
+    private func originalTrashName(_ url:URL)->String{let n=url.lastPathComponent;guard let m=n.range(of:"__")else{return n};return String(n[m.upperBound...])}
 }
 
 struct TrashView: View {
-    @ObservedObject var model: AppModel
-    @State private var items: [LocalMedia] = []
-    @State private var confirmEmpty = false
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                if items.isEmpty {
-                    ContentUnavailableView("السلة فارغة", systemImage: "trash", description: Text("الملفات المحذوفة تبقى هنا 15 يومًا"))
-                        .padding(.top, 80)
-                } else {
-                    HStack {
-                        Text("تُحذف تلقائيًا بعد 15 يومًا").font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("إفراغ السلة", role: .destructive) { confirmEmpty = true }
-                    }
-                    ForEach(items) { item in
-                        HStack(spacing: 12) {
-                            LocalThumb(item: item).frame(width: 64, height: 58).clipShape(RoundedRectangle(cornerRadius: 13))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(displayName(item.url)).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                Text("\(model.formattedBytes(item.size)) • \(model.trashRemainingText(item))").font(.caption2).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Menu {
-                                Button("استرجاع", systemImage: "arrow.uturn.backward") { model.restoreFromTrash(item); reload() }
-                                Button("حذف نهائي", systemImage: "trash", role: .destructive) { model.deleteTrashPermanently(item); reload() }
-                            } label: { Image(systemName: "ellipsis").frame(width: 40, height: 40) }
-                        }
-                        .padding(10)
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                    }
-                }
-            }.padding(16)
-        }
-        .navigationTitle("سلة المهملات")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear { reload() }
-        .confirmationDialog("حذف جميع الملفات نهائيًا؟", isPresented: $confirmEmpty) {
-            Button("حذف الكل", role: .destructive) { model.emptyTrash(); reload() }
-        }
-    }
-
-    private func reload() { items = model.trashItems() }
-    private func displayName(_ url: URL) -> String {
-        let name = url.lastPathComponent
-        guard let r = name.range(of: "__") else { return name }
-        return String(name[r.upperBound...])
-    }
+    @ObservedObject var model:AppModel; @State private var items:[LocalMedia]=[]; @State private var confirm=false
+    var body: some View { ScrollView{LazyVStack(spacing:10){if items.isEmpty{ContentUnavailableView("السلة فارغة",systemImage:"trash",description:Text("المحذوفات تبقى 15 يومًا")).padding(.top,70)}else{HStack{Text("تُحذف تلقائيًا بعد 15 يومًا").font(.caption).foregroundStyle(.secondary);Spacer();Button("إفراغ",role:.destructive){confirm=true}};ForEach(items){i in HStack(spacing:10){LocalThumb(item:i).frame(width:54,height:48).clipShape(RoundedRectangle(cornerRadius:11));VStack(alignment:.leading,spacing:3){Text(display(i.url)).font(.subheadline.weight(.semibold)).lineLimit(1);Text("\(model.formattedBytes(i.size)) • \(model.trashRemainingText(i))").font(.caption2).foregroundStyle(.secondary)};Spacer();Menu{Button("استرجاع",systemImage:"arrow.uturn.backward"){model.restoreFromTrash(i);reload()};Button("حذف نهائي",systemImage:"trash",role:.destructive){model.deleteTrashPermanently(i);reload()}}label:{Image(systemName:"ellipsis").frame(width:36,height:36)}}.padding(8).background(.thinMaterial,in:RoundedRectangle(cornerRadius:15))}}}.padding(15)}.navigationTitle("سلة المهملات").navigationBarTitleDisplayMode(.inline).onAppear{reload()}.confirmationDialog("حذف جميع الملفات نهائيًا؟",isPresented:$confirm){Button("حذف الكل",role:.destructive){model.emptyTrash();reload()}} }
+    private func reload(){items=model.trashItems()}; private func display(_ u:URL)->String{let n=u.lastPathComponent;guard let r=n.range(of:"__")else{return n};return String(n[r.upperBound...])}
 }
 
 struct MediaQuickActionsSheet: View {
-    @ObservedObject var model: AppModel
-    let item: LocalMedia
-    @Environment(\.dismiss) private var dismiss
-    @State private var busy = false
-    @State private var showShare = false
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 14) {
-                HStack(spacing: 11) {
-                    LocalThumb(item: item).frame(width: 54, height: 50).clipShape(RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1)
-                        Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary) }
-                }
-
-                HStack(spacing: 8) {
-                    if item.isVideo {
-                        NavigationLink { MediaEditorView(sourceURL: item.url, model: model) } label: {
-                            CompactTool(title: "تعديل", icon: "slider.horizontal.3")
-                        }.buttonStyle(.plain)
-                    }
-
-                    Menu {
-                        if item.isVideo {
-                            Button("استخراج الصوت", systemImage: "waveform") { run { await model.extractAudio(from: item) } }
-                            Button("عزل الكلام", systemImage: "mic") { run { await model.separateCenterAudioFast(from: item, keepVoice: true) } }
-                            Button("تقليل الصوت البشري", systemImage: "person.wave.2") { run { await model.separateCenterAudioFast(from: item, keepVoice: false) } }
-                        }
-                    } label: { CompactTool(title: "الصوت", icon: "waveform") }
-
-                    Menu {
-                        if item.isVideo {
-                            Button("تحويل إلى GIF", systemImage: "photo.stack") { run { await model.videoToGIF(item) } }
-                            Button("نسخة 720p", systemImage: "arrow.down.right.and.arrow.up.left") { run { await model.compress720(from: item) } }
-                            Button("لقطة وسطية", systemImage: "photo") { run { await model.grabMiddleFrame(from: item) } }
-                            Button("لوحة 9 لقطات", systemImage: "square.grid.3x3") { run { await model.contactSheet(from: item) } }
-                        }
-                        if item.ext == "gif" { Button("GIF إلى فيديو", systemImage: "film") { run { await model.gifToVideo(item) } } }
-                        if item.isImage || item.isVideo { Button("تنظيف الخصوصية", systemImage: "shield") { run { await model.privacyCleanCopy(from: item) } } }
-                    } label: { CompactTool(title: "أدوات", icon: "wand.and.stars") }
-
-                    Menu {
-                        if item.isImage || item.isVideo {
-                            Button("حفظ في الصور", systemImage: "photo.badge.plus") { run { await model.saveExistingToPhotos(item.url) } }
-                            Button("Snapchat", systemImage: "paperplane") {
-                                model.prepareForSnapchat(item)
-                                showShare = true
-                            }
-                        }
-                        ShareLink(item: item.url) { Label("مشاركة للتطبيقات", systemImage: "square.and.arrow.up") }
-                    } label: { CompactTool(title: "مشاركة", icon: "square.and.arrow.up") }
-                }
-
-                HStack(spacing: 10) {
-                    Button { model.autoRename(item); dismiss() } label: {
-                        Label("اسم مرتب", systemImage: "textformat").font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 11)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    }.buttonStyle(.plain)
-
-                    Button(role: .destructive) {
-                        model.moveToTrash(item); dismiss()
-                    } label: {
-                        Label("حذف", systemImage: "trash").font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 11)
-                            .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
-                    }.buttonStyle(.plain)
-                }
-
-                if busy {
-                    HStack(spacing: 8) { ProgressView(); Text("جارٍ التنفيذ…").font(.caption).foregroundStyle(.secondary) }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(16)
-            .navigationBarHidden(true)
+    @ObservedObject var model:AppModel; let item:LocalMedia; @Environment(\.dismiss) private var dismiss; @State private var busy=false; @State private var share=false
+    var body: some View { NavigationStack{VStack(spacing:12){
+        HStack(spacing:10){LocalThumb(item:item).frame(width:48,height:44).clipShape(RoundedRectangle(cornerRadius:10));VStack(alignment:.leading,spacing:2){Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1);Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)};Spacer();Button{dismiss()}label:{Image(systemName:"xmark.circle.fill").font(.title2).foregroundStyle(.secondary)}}
+        HStack(spacing:7){
+            if item.isVideo{NavigationLink{MediaEditorView(sourceURL:item.url,model:model)}label:{CompactTool(title:"تعديل",icon:"slider.horizontal.3")}.buttonStyle(.plain)}
+            Menu{if item.isVideo{Button("حذف الموسيقى وإبقاء الكلام",systemImage:"mic.fill"){run{await model.separateCenterAudioFast(from:item,keepVoice:true)}};Button("حذف الكلام وإبقاء الموسيقى",systemImage:"music.note"){run{await model.separateCenterAudioFast(from:item,keepVoice:false)}};Button("استخراج الصوت",systemImage:"waveform"){run{await model.extractAudio(from:item)}}}}label:{CompactTool(title:"الصوت",icon:"waveform")}
+            Menu{if item.isVideo{Button("تحويل إلى GIF",systemImage:"photo.stack"){run{await model.videoToGIF(item)}};Button("نسخة 720p",systemImage:"arrow.down.right.and.arrow.up.left"){run{await model.compress720(from:item)}};Button("لقطة وسطية",systemImage:"photo"){run{await model.grabMiddleFrame(from:item)}};Button("لوحة 9 لقطات",systemImage:"square.grid.3x3"){run{await model.contactSheet(from:item)}}};if item.ext=="gif"{Button("GIF إلى فيديو",systemImage:"film"){run{await model.gifToVideo(item)}}};if item.isImage || item.isVideo{Button("تنظيف الخصوصية",systemImage:"shield"){run{await model.privacyCleanCopy(from:item)}}}}label:{CompactTool(title:"أدوات",icon:"wand.and.stars")}
+            Menu{if item.isImage || item.isVideo{Button("حفظ في الصور",systemImage:"photo.badge.plus"){run{await model.saveExistingToPhotos(item.url)}};Button("Snapchat",systemImage:"paperplane"){model.prepareForSnapchat(item);share=true}};ShareLink(item:item.url){Label("مشاركة للتطبيقات",systemImage:"square.and.arrow.up")}}label:{CompactTool(title:"مشاركة",icon:"square.and.arrow.up")}
         }
-        .presentationDetents([.height(260), .medium])
-        .presentationDragIndicator(.visible)
-        .sheet(isPresented: $showShare) { ActivityShareView(items: [item.url]) }
-    }
-
-    private func run(_ op: @escaping () async -> Void) {
-        busy = true
-        Task { await op(); busy = false }
-    }
+        HStack(spacing:8){Button{model.autoRename(item);dismiss()}label:{Label("اسم مرتب",systemImage:"textformat").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(.thinMaterial,in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain);Button(role:.destructive){model.moveToTrash(item);dismiss()}label:{Label("حذف",systemImage:"trash").font(.caption).frame(maxWidth:.infinity).padding(.vertical,9).background(Color.red.opacity(0.10),in:RoundedRectangle(cornerRadius:12))}.buttonStyle(.plain)}
+        if busy{HStack(spacing:7){ProgressView();Text("جارٍ المعالجة…").font(.caption).foregroundStyle(.secondary)}}
+        Text("فصل الكلام/الموسيقى يعمل بأفضل نتيجة عندما يكون الكلام في منتصف مكس الستيريو.").font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+    }.padding(14).navigationBarHidden(true)}.presentationDetents([.height(235),.medium]).presentationDragIndicator(.visible).sheet(isPresented:$share){ActivityShareView(items:[item.url])} }
+    private func run(_ op:@escaping()->Void){busy=true;op();DispatchQueue.main.asyncAfter(deadline:.now()+0.2){busy=false}}
+    private func run(_ op:@escaping() async->Void){busy=true;Task{await op();busy=false}}
 }
 
-struct CompactTool: View {
-    let title: String
-    let icon: String
-    var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: icon).font(.headline)
-            Text(title).font(.caption2.weight(.medium)).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 58)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 15))
-    }
-}
+struct CompactTool: View { let title:String;let icon:String;var body: some View{VStack(spacing:4){Image(systemName:icon).font(.headline);Text(title).font(.caption2.weight(.medium)).lineLimit(1)}.frame(maxWidth:.infinity).frame(height:52).background(.thinMaterial,in:RoundedRectangle(cornerRadius:13))} }
