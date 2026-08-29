@@ -60,6 +60,46 @@ jobs:
           s = s.replace('}}private func format(', '}}; private func format(')
           p.write_text(s)
 
+          # Compile fixes for the smart feature files.
+          p = Path('V11/SmartFeaturesCore.swift')
+          s = p.read_text()
+          if 'import AVFoundation' not in s:
+              s = s.replace('import Foundation\n', 'import Foundation\nimport AVFoundation\n', 1)
+          p.write_text(s)
+
+          p = Path('V11/SmartFeaturesUI.swift')
+          s = p.read_text()
+          s = s.replace('if m.hasAudio{Image(systemName:"speaker.wave.2.fill").foregroundStyle(.green)}}}.padding', 'if m.hasAudio{Image(systemName:"speaker.wave.2.fill").foregroundStyle(.green)}}}}.padding')
+          p.write_text(s)
+
+          p = Path('V11/SmartVideoTools.swift')
+          s = p.read_text()
+          for old,new in [
+              ('outputFileType=.mp4','outputFileType = .mp4'),
+              ('outputFileType=.m4a','outputFileType = .m4a'),
+              ('taskHint=.dictation','taskHint = .dictation'),
+              ('performSeparation(mode:.full)','performSeparation(mode: .full)'),
+              ('outputFileType=.mov','outputFileType = .mov')
+          ]:
+              s = s.replace(old,new)
+          old = 'for seg in result.bestTranscription.segments{words.append(seg);if words.count>=9 || ((words.last?.timestamp ?? 0)+(words.last?.duration ?? 0)-(words.first?.timestamp ?? 0)>3.8){let s=start+(words.first?.timestamp ?? 0);let e=start+(words.last.map{$0.timestamp+$0.duration} ?? 0);let text=words.map(\\.substring).joined(separator:" ");let tr=try await translateV3(text,target:target);output.append(CaptionV3(start:s,end:max(s+0.2,e),source:text,translated:tr));words=[]}}'
+          new = '''for seg in result.bestTranscription.segments {
+                    words.append(seg)
+                    let firstTime = words.first?.timestamp ?? 0
+                    let lastTime = (words.last?.timestamp ?? 0) + (words.last?.duration ?? 0)
+                    let span = lastTime - firstTime
+                    if words.count >= 9 || span > 3.8 {
+                        let absoluteStart = start + firstTime
+                        let absoluteEnd = start + lastTime
+                        let text = words.map(\\.substring).joined(separator: " ")
+                        let translated = try await translateV3(text, target: target)
+                        output.append(CaptionV3(start: absoluteStart, end: max(absoluteStart + 0.2, absoluteEnd), source: text, translated: translated))
+                        words.removeAll(keepingCapacity: true)
+                    }
+                }'''
+          s = s.replace(old,new)
+          p.write_text(s)
+
           for p in Path('V11').glob('*.swift'):
               if p.name in ('DemucsVendor.swift', 'V26Fixes.swift', 'SmartFeaturesCore.swift', 'SmartVideoTools.swift', 'SmartFeaturesUI.swift'):
                   continue
@@ -73,20 +113,17 @@ jobs:
               s = s.replace('model.separateCenterAudio(', 'model.separateWithDemucs(')
               p.write_text(s)
 
-          # Enable automation rules after link resolution.
           p = Path('V11/AppCore.swift')
           s = p.read_text()
           s = s.replace('            results = media\n', '            results = media\n            await applyDownloadRulesIfNeededV3(source: source)\n', 1)
           p.write_text(s)
 
-          # Persist source/platform/quality history for both progressive and merged downloads.
           p = Path('V11/SmartDownload.swift')
           s = p.read_text()
           s = s.replace('let saved = try persist(mergedTmp, "\\(base).mp4")', 'let saved = try persist(mergedTmp, "\\(base).mp4")\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
           s = s.replace('let saved = try persist(tmp, final)', 'let saved = try persist(tmp, final)\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
           p.write_text(s)
 
-          # Native library: keep the normal tools and add a separate Smart button.
           p = Path('V11/V26Fixes.swift')
           s = p.read_text()
           s = s.replace('@State private var actionItem: LocalMedia?\n', '@State private var actionItem: LocalMedia?\n    @State private var smartItem: LocalMedia?\n', 1)
@@ -110,7 +147,6 @@ jobs:
           s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }\n            .sheet(item: $smartItem) { SmartToolsView(model:model,item:$0) }')
           p.write_text(s)
 
-          # Main UI integration: quality comparison and automation hub in settings.
           p = Path('V11/Views.swift')
           s = p.read_text()
           s = s.replace('LibraryView(model:model).tabItem', 'LibraryViewV26(model:model).tabItem')
@@ -119,7 +155,6 @@ jobs:
           s = s.replace('        TextField("اسم الملف",text:$name)', '        if model.results.count > 1 { QualityComparisonV3(model:model,items:model.results) }\n        TextField("اسم الملف",text:$name)', 1)
           s = s.replace('Section("المساحة"){', 'Section("ميزات متقدمة"){NavigationLink{SmartAutomationHubV3(model:model)}label:{Label("الأتمتة والذكاء",systemImage:"sparkles")}};Section("المساحة"){', 1)
           s = s.replace('}.onAppear{model.purgeExpiredTrash()}', '}.onAppear{model.purgeExpiredTrash();Task{await model.processWatchFolderV3()}}', 1)
-
           old = 'else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}'
           new = 'else{Group{if item.isVideo || item.isAudio{Button{PlaybackCenter.shared.play(item)}label:{content}.buttonStyle(.plain)}else if item.ext.lowercased()=="srt" || item.ext.lowercased()=="txt"{NavigationLink{SubtitleViewerView(item:item)}label:{content}.buttonStyle(.plain)}else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}}}'
           if old in s:
