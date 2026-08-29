@@ -18,9 +18,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
-          # Fix compact helper declarations generated on one line.
           p = Path('V11/FullMediaSuite.swift')
           s = p.read_text()
           s = s.replace('])}private func run(', '])}; private func run(')
@@ -28,74 +26,20 @@ jobs:
           s = s.replace('}}private func format(', '}}; private func format(')
           p.write_text(s)
 
-          # Route old feature buttons to the corrected implementations.
           for p in Path('V11').glob('*.swift'):
               s = p.read_text()
               s = s.replace('model.translateVideoToSRT(', 'model.translateVideoToSRTFixed(')
               s = s.replace('model.separateCenterAudio(', 'model.separateCenterAudioFixed(')
               p.write_text(s)
 
-          # Add a persistent mini-player under the current tab content.
           p = Path('V11/Views.swift')
           s = p.read_text()
-          s = s.replace(
-              '}.tint(T.olive).overlay(alignment:.top)',
-              '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){MiniPlaybackBar()}.overlay(alignment:.top)'
-          )
-
-          replacement = r'''struct LibraryCompactRow: View {
-    @ObservedObject var model:AppModel
-    let item:LocalMedia
-    let selecting:Bool
-    let selected:Bool
-    let toggle:()->Void
-    let actions:()->Void
-
-    var body: some View {
-        HStack(spacing:9) {
-            if selecting {
-                Button(action:toggle) {
-                    Image(systemName:selected ? "checkmark.circle.fill":"circle")
-                        .font(.title3)
-                        .foregroundStyle(selected ? T.olive:.secondary)
-                }
-            }
-
-            if selecting {
-                Button(action:toggle) { content }.buttonStyle(.plain)
-            } else if item.isVideo || item.isAudio {
-                Button { PlaybackCenter.shared.play(item) } label: { content }
-                    .buttonStyle(.plain)
-            } else {
-                NavigationLink { MediaDetailView(model:model,item:item) } label: { content }
-                    .buttonStyle(.plain)
-            }
-
-            Spacer(minLength:2)
-            if !selecting {
-                Button(action:actions) { Image(systemName:"ellipsis").frame(width:32,height:32) }
-            }
-        }
-        .padding(.horizontal,9)
-        .padding(.vertical,5)
-        .background(.thinMaterial,in:RoundedRectangle(cornerRadius:14))
-    }
-
-    private var content: some View {
-        HStack(spacing:9) {
-            LocalThumb(item:item).frame(width:48,height:42).clipShape(RoundedRectangle(cornerRadius:9))
-            VStack(alignment:.leading,spacing:2) {
-                Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-struct CompactMediaRow'''
-          s, n = re.subn(r'struct LibraryCompactRow: View \{.*?\n\}\n\nstruct CompactMediaRow', replacement, s, flags=re.S)
-          if n != 1:
-              raise SystemExit(f'LibraryCompactRow patch count = {n}')
+          s = s.replace('}.tint(T.olive).overlay(alignment:.top)', '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){MiniPlaybackBar()}.overlay(alignment:.top)')
+          old = 'else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}'
+          new = 'else{Group{if item.isVideo || item.isAudio{Button{PlaybackCenter.shared.play(item)}label:{content}.buttonStyle(.plain)}else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}}}'
+          if old not in s:
+              raise SystemExit('Library row patch target not found')
+          s = s.replace(old, new, 1)
           p.write_text(s)
           PY
       - name: Generate Xcode project
