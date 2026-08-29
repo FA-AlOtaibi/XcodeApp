@@ -21,46 +21,44 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/demucs-model /tmp/demucs.zip V11/HTDemucs_SourceSeparation_F32.mlpackage V11/DemucsVendor.swift
           mkdir -p /tmp/demucs-model
-          curl -L --fail --retry 3 \
-            -o /tmp/demucs.zip \
-            https://github.com/john-rocky/CoreML-Models/releases/download/demucs-v1/HTDemucs_SourceSeparation_F32.mlpackage.zip
+          curl -L --fail --retry 3 -o /tmp/demucs.zip https://github.com/john-rocky/CoreML-Models/releases/download/demucs-v1/HTDemucs_SourceSeparation_F32.mlpackage.zip
           unzip -q /tmp/demucs.zip -d /tmp/demucs-model
           MODEL_PATH="$(find /tmp/demucs-model -type d -name 'HTDemucs_SourceSeparation_F32.mlpackage' | head -1)"
           test -n "$MODEL_PATH"
           cp -R "$MODEL_PATH" V11/HTDemucs_SourceSeparation_F32.mlpackage
-
-          curl -L --fail --retry 3 \
-            -o V11/DemucsVendor.swift \
-            https://raw.githubusercontent.com/john-rocky/CoreML-Models/master/sample_apps/DemucsDemo/DemucsDemo/ContentView.swift
-
+          curl -L --fail --retry 3 -o V11/DemucsVendor.swift https://raw.githubusercontent.com/john-rocky/CoreML-Models/master/sample_apps/DemucsDemo/DemucsDemo/ContentView.swift
           python3 - <<'PY'
           from pathlib import Path
           p = Path('V11/DemucsVendor.swift')
           s = p.read_text()
-          s = s.replace('AudioFilePickerView', 'DemucsSampleAudioFilePickerView')
-          s = s.replace('StemPlayerView', 'DemucsSampleStemPlayerView')
-          s = s.replace('ShareSheet', 'DemucsSampleShareSheet')
-          s = s.replace('ContentView', 'DemucsSampleContentView')
-          s = s.replace('private var stemURLs: [Stem: URL] = [:]', 'var stemURLs: [Stem: URL] = [:]')
-          s = s.replace('private func performSeparation(mode: SeparationMode) async throws', 'func performSeparation(mode: SeparationMode) async throws')
-          s = s.replace('config.computeUnits = .cpuOnly', 'config.computeUnits = .cpuAndGPU')
+          for old,new in [
+              ('AudioFilePickerView','DemucsSampleAudioFilePickerView'),
+              ('StemPlayerView','DemucsSampleStemPlayerView'),
+              ('ShareSheet','DemucsSampleShareSheet'),
+              ('ContentView','DemucsSampleContentView'),
+              ('private var stemURLs: [Stem: URL] = [:]','var stemURLs: [Stem: URL] = [:]'),
+              ('private func performSeparation(mode: SeparationMode) async throws','func performSeparation(mode: SeparationMode) async throws'),
+              ('config.computeUnits = .cpuOnly','config.computeUnits = .cpuAndGPU')
+          ]: s = s.replace(old,new)
           p.write_text(s)
           PY
 
-      - name: Wire media features
+      - name: Apply runtime fixes
         working-directory: HammelBuild
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          # Existing compact source syntax fixes.
           p = Path('V11/FullMediaSuite.swift')
           s = p.read_text()
           s = s.replace('])}private func run(', '])}; private func run(')
           s = s.replace('])}private func crop(', '])}; private func crop(')
           s = s.replace('}}private func format(', '}}; private func format(')
+          # Any nested tool/editor sheet must open large so the editor can actually scroll.
+          s = s.replace('.presentationDetents([.medium])', '.presentationDetents([.large])')
           p.write_text(s)
 
-          # Compile fixes for the smart feature files.
           p = Path('V11/SmartFeaturesCore.swift')
           s = p.read_text()
           if 'import AVFoundation' not in s:
@@ -80,8 +78,7 @@ jobs:
               ('taskHint=.dictation','taskHint = .dictation'),
               ('performSeparation(mode:.full)','performSeparation(mode: .full)'),
               ('outputFileType=.mov','outputFileType = .mov')
-          ]:
-              s = s.replace(old,new)
+          ]: s = s.replace(old,new)
           old = 'for seg in result.bestTranscription.segments{words.append(seg);if words.count>=9 || ((words.last?.timestamp ?? 0)+(words.last?.duration ?? 0)-(words.first?.timestamp ?? 0)>3.8){let s=start+(words.first?.timestamp ?? 0);let e=start+(words.last.map{$0.timestamp+$0.duration} ?? 0);let text=words.map(\\.substring).joined(separator:" ");let tr=try await translateV3(text,target:target);output.append(CaptionV3(start:s,end:max(s+0.2,e),source:text,translated:tr));words=[]}}'
           new = '''for seg in result.bestTranscription.segments {
                     words.append(seg)
@@ -100,8 +97,9 @@ jobs:
           s = s.replace(old,new)
           p.write_text(s)
 
+          # Route every old translation/audio-separation entry to the fixed implementations.
           for p in Path('V11').glob('*.swift'):
-              if p.name in ('DemucsVendor.swift', 'V26Fixes.swift', 'SmartFeaturesCore.swift', 'SmartVideoTools.swift', 'SmartFeaturesUI.swift'):
+              if p.name in ('DemucsVendor.swift','V26Fixes.swift','SmartFeaturesCore.swift','SmartVideoTools.swift','SmartFeaturesUI.swift'):
                   continue
               s = p.read_text()
               s = s.replace('model.translateVideoToSRTComplete(', 'model.translateVideoToSRTV26(')
@@ -113,53 +111,69 @@ jobs:
               s = s.replace('model.separateCenterAudio(', 'model.separateWithDemucs(')
               p.write_text(s)
 
+          # Auto-download rules after resolving.
           p = Path('V11/AppCore.swift')
           s = p.read_text()
-          s = s.replace('            results = media\n', '            results = media\n            await applyDownloadRulesIfNeededV3(source: source)\n', 1)
+          if 'await applyDownloadRulesIfNeededV3(source: source)' not in s:
+              s = s.replace('            results = media\n', '            results = media\n            await applyDownloadRulesIfNeededV3(source: source)\n', 1)
           p.write_text(s)
 
+          # Record source history and use a safer local HQ mux path.
           p = Path('V11/SmartDownload.swift')
           s = p.read_text()
-          s = s.replace('let saved = try persist(mergedTmp, "\\(base).mp4")', 'let saved = try persist(mergedTmp, "\\(base).mp4")\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
-          s = s.replace('let saved = try persist(tmp, final)', 'let saved = try persist(tmp, final)\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
+          if 'recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)' not in s:
+              s = s.replace('let saved = try persist(mergedTmp, "\\(base).mp4")', 'let saved = try persist(mergedTmp, "\\(base).mp4")\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
+              s = s.replace('let saved = try persist(tmp, final)', 'let saved = try persist(tmp, final)\n                recordDownloadHistoryV3(item: item, sourceURL: input, savedURL: saved)')
+          s = s.replace('presetName: AVAssetExportPresetPassthrough', 'presetName: AVAssetExportPresetHighestQuality')
           p.write_text(s)
 
+          # Library: expose smart tools visibly (not hidden behind a swipe), keep native swipe actions.
           p = Path('V11/V26Fixes.swift')
           s = p.read_text()
-          s = s.replace('@State private var actionItem: LocalMedia?\n', '@State private var actionItem: LocalMedia?\n    @State private var smartItem: LocalMedia?\n', 1)
-          old = '''.swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                    Button { actionItem = item } label: {
-                                        Label("أدوات", systemImage: "ellipsis")
-                                    }
-                                    .tint(olive)
-                                }'''
-          new = '''.swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                    Button { smartItem = item } label: {
-                                        Label("ذكي", systemImage: "sparkles")
-                                    }
-                                    .tint(.indigo)
-                                    Button { actionItem = item } label: {
-                                        Label("أدوات", systemImage: "ellipsis")
-                                    }
-                                    .tint(olive)
-                                }'''
-          s = s.replace(old, new)
-          s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }\n            .sheet(item: $smartItem) { SmartToolsView(model:model,item:$0) }')
+          if '@State private var smartItem: LocalMedia?' not in s:
+              s = s.replace('@State private var actionItem: LocalMedia?\n', '@State private var actionItem: LocalMedia?\n    @State private var smartItem: LocalMedia?\n', 1)
+          old_btn = '''if !selecting {
+                Button { actionItem = item } label: {
+                    Image(systemName: "ellipsis").frame(width: 34, height: 34)
+                }.buttonStyle(.plain)
+            }'''
+          new_btn = '''if !selecting {
+                Button { smartItem = item } label: {
+                    Image(systemName: "sparkles")
+                        .foregroundStyle(olive)
+                        .frame(width: 34, height: 34)
+                        .background(olive.opacity(0.10), in: Circle())
+                }.buttonStyle(.plain)
+                Button { actionItem = item } label: {
+                    Image(systemName: "ellipsis").frame(width: 34, height: 34)
+                }.buttonStyle(.plain)
+            }'''
+          s = s.replace(old_btn,new_btn)
+          if '.sheet(item: $smartItem)' not in s:
+              s = s.replace('.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0) }', '.sheet(item: $actionItem) { MediaQuickActionsSheet(model: model, item: $0).presentationDetents([.large]) }\n            .sheet(item: $smartItem) { SmartToolsView(model:model,item:$0).presentationDetents([.large]) }')
+          else:
+              s = s.replace('MediaQuickActionsSheet(model: model, item: $0) }', 'MediaQuickActionsSheet(model: model, item: $0).presentationDetents([.large]) }')
+              s = s.replace('SmartToolsView(model:model,item:$0) }', 'SmartToolsView(model:model,item:$0).presentationDetents([.large]) }')
           p.write_text(s)
 
+          # Main app wiring: V26 library, floating player, quality comparison and smart hub.
           p = Path('V11/Views.swift')
           s = p.read_text()
           s = s.replace('LibraryView(model:model).tabItem', 'LibraryViewV26(model:model).tabItem')
-          s = s.replace('}.tint(T.olive).overlay(alignment:.top)', '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){FloatingPlaybackDock()}.overlay(alignment:.top)')
+          if 'safeAreaInset(edge:.bottom,spacing:0){FloatingPlaybackDock()}' not in s:
+              s = s.replace('}.tint(T.olive).overlay(alignment:.top)', '}.tint(T.olive).safeAreaInset(edge:.bottom,spacing:0){FloatingPlaybackDock()}.overlay(alignment:.top)')
           s = s.replace('Text("نزّل. رتّب. استخدم.").font(.caption).foregroundStyle(.secondary)', 'EmptyView()')
-          s = s.replace('        TextField("اسم الملف",text:$name)', '        if model.results.count > 1 { QualityComparisonV3(model:model,items:model.results) }\n        TextField("اسم الملف",text:$name)', 1)
-          s = s.replace('Section("المساحة"){', 'Section("ميزات متقدمة"){NavigationLink{SmartAutomationHubV3(model:model)}label:{Label("الأتمتة والذكاء",systemImage:"sparkles")}};Section("المساحة"){', 1)
+          if 'QualityComparisonV3(model:model,items:model.results)' not in s:
+              s = s.replace('        TextField("اسم الملف",text:$name)', '        if model.results.count > 1 { QualityComparisonV3(model:model,items:model.results) }\n        TextField("اسم الملف",text:$name)', 1)
+          if 'SmartAutomationHubV3(model:model)' not in s:
+              s = s.replace('Section("المساحة"){', 'Section("ميزات متقدمة"){NavigationLink{SmartAutomationHubV3(model:model)}label:{Label("الأتمتة والذكاء",systemImage:"sparkles")}};Section("المساحة"){', 1)
           s = s.replace('}.onAppear{model.purgeExpiredTrash()}', '}.onAppear{model.purgeExpiredTrash();Task{await model.processWatchFolderV3()}}', 1)
-          old = 'else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}'
-          new = 'else{Group{if item.isVideo || item.isAudio{Button{PlaybackCenter.shared.play(item)}label:{content}.buttonStyle(.plain)}else if item.ext.lowercased()=="srt" || item.ext.lowercased()=="txt"{NavigationLink{SubtitleViewerView(item:item)}label:{content}.buttonStyle(.plain)}else{NavigationLink{MediaDetailView(model:model,item:item)}label:{content}.buttonStyle(.plain)}}}'
-          if old in s:
-              s = s.replace(old, new, 1)
-          s = s.replace('NavigationLink{MediaDetailView(model:model,item:i)}label:{CompactMediaRow(item:i,model:model)}', 'NavigationLink{Group{if i.ext.lowercased()=="srt" || i.ext.lowercased()=="txt"{SubtitleViewerView(item:i)}else{MediaDetailView(model:model,item:i)}}}label:{CompactMediaRow(item:i,model:model)}')
+          p.write_text(s)
+
+          # Editor itself gets a stable large scrollable layout with bottom padding.
+          p = Path('V11/MediaViews.swift')
+          s = p.read_text()
+          s = s.replace('            }.padding(20)\n        }\n        .navigationTitle("تعديل الفيديو")', '            }.padding(20).padding(.bottom, 80)\n        }\n        .scrollIndicators(.visible)\n        .navigationTitle("تعديل الفيديو")', 1)
           p.write_text(s)
           PY
 
@@ -188,15 +202,15 @@ jobs:
         working-directory: HammelBuild
         run: |
           test -d build/Hammel.app
-          rm -rf Payload
+          rm -rf Payload Hammel-fixed.ipa
           mkdir Payload
           cp -R build/Hammel.app Payload/Hammel.app
-          /usr/bin/zip -qry Hammel-unsigned.ipa Payload
-          ls -lh Hammel-unsigned.ipa
+          /usr/bin/zip -qry Hammel-fixed.ipa Payload
+          ls -lh Hammel-fixed.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Hammel-unsigned-IPA
-          path: HammelBuild/Hammel-unsigned.ipa
+          name: Hammel-Fixed-IPA
+          path: HammelBuild/Hammel-fixed.ipa
           if-no-files-found: error
