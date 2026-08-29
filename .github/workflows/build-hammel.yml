@@ -35,26 +35,15 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          import re
-
           p = Path('V11/DemucsVendor.swift')
           s = p.read_text()
-          # Avoid collisions with the app's own views while retaining the tested DSP/model pipeline.
-          replacements = {
-              'struct ContentView: View': 'struct DemucsSampleContentView: View',
-              'ContentView()': 'DemucsSampleContentView()',
-              'StemPlayerView(': 'DemucsSampleStemPlayerView(',
-              'struct StemPlayerView: View': 'struct DemucsSampleStemPlayerView: View',
-              'ShareSheet(': 'DemucsSampleShareSheet(',
-              'struct ShareSheet: UIViewControllerRepresentable': 'struct DemucsSampleShareSheet: UIViewControllerRepresentable',
-              'AudioFilePickerView(': 'DemucsSampleAudioFilePickerView(',
-              'struct AudioFilePickerView: UIViewControllerRepresentable': 'struct DemucsSampleAudioFilePickerView: UIViewControllerRepresentable',
-              'private var stemURLs: [Stem: URL] = [:]': 'var stemURLs: [Stem: URL] = [:]',
-              'private func performSeparation(mode: SeparationMode) async throws': 'func performSeparation(mode: SeparationMode) async throws',
-              'config.computeUnits = .cpuOnly': 'config.computeUnits = .cpuAndGPU',
-          }
-          for a, b in replacements.items():
-              s = s.replace(a, b)
+          s = s.replace('AudioFilePickerView', 'DemucsSampleAudioFilePickerView')
+          s = s.replace('StemPlayerView', 'DemucsSampleStemPlayerView')
+          s = s.replace('ShareSheet', 'DemucsSampleShareSheet')
+          s = s.replace('ContentView', 'DemucsSampleContentView')
+          s = s.replace('private var stemURLs: [Stem: URL] = [:]', 'var stemURLs: [Stem: URL] = [:]')
+          s = s.replace('private func performSeparation(mode: SeparationMode) async throws', 'func performSeparation(mode: SeparationMode) async throws')
+          s = s.replace('config.computeUnits = .cpuOnly', 'config.computeUnits = .cpuAndGPU')
           p.write_text(s)
           PY
 
