@@ -25,9 +25,7 @@ extension AppModel {
             UserDefaults.standard.set(Array(favoritePaths), forKey: "favorites")
             refreshStorage()
             show("نُقل إلى سلة المهملات", .success)
-        } catch {
-            show("تعذر نقل الملف إلى السلة", .error)
-        }
+        } catch { show("تعذر نقل الملف إلى السلة", .error) }
     }
 
     func trashItems() -> [LocalMedia] {
@@ -56,11 +54,8 @@ extension AppModel {
                 n += 1
             }
             try FileManager.default.moveItem(at: item.url, to: dst)
-            refreshStorage()
-            show("تم استرجاع الملف", .success)
-        } catch {
-            show("تعذر استرجاع الملف", .error)
-        }
+            refreshStorage(); show("تم استرجاع الملف", .success)
+        } catch { show("تعذر استرجاع الملف", .error) }
     }
 
     func deleteTrashPermanently(_ item: LocalMedia) {
@@ -82,9 +77,7 @@ extension AppModel {
         let folder = trashFolder()
         guard let urls = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return }
         let cutoff = Date().addingTimeInterval(-15 * 86400)
-        for url in urls where deletionDate(for: url) < cutoff {
-            try? fm.removeItem(at: url)
-        }
+        for url in urls where deletionDate(for: url) < cutoff { try? fm.removeItem(at: url) }
     }
 
     func trashRemainingText(_ item: LocalMedia) -> String {
@@ -138,9 +131,7 @@ struct TrashView: View {
                             Menu {
                                 Button("استرجاع", systemImage: "arrow.uturn.backward") { model.restoreFromTrash(item); reload() }
                                 Button("حذف نهائي", systemImage: "trash", role: .destructive) { model.deleteTrashPermanently(item); reload() }
-                            } label: {
-                                Image(systemName: "ellipsis").frame(width: 40, height: 40)
-                            }
+                            } label: { Image(systemName: "ellipsis").frame(width: 40, height: 40) }
                         }
                         .padding(10)
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
@@ -169,63 +160,84 @@ struct MediaQuickActionsSheet: View {
     let item: LocalMedia
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
+    @State private var showShare = false
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    HStack(spacing: 12) {
-                        LocalThumb(item: item).frame(width: 72, height: 64).clipShape(RoundedRectangle(cornerRadius: 14))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(item.url.deletingPathExtension().lastPathComponent).font(.headline).lineLimit(2)
-                            Text(model.formattedBytes(item.size)).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
+            VStack(spacing: 14) {
+                HStack(spacing: 11) {
+                    LocalThumb(item: item).frame(width: 54, height: 50).clipShape(RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.url.deletingPathExtension().lastPathComponent).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Text(model.formattedBytes(item.size)).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary) }
+                }
+
+                HStack(spacing: 8) {
+                    if item.isVideo {
+                        NavigationLink { MediaEditorView(sourceURL: item.url, model: model) } label: {
+                            CompactTool(title: "تعديل", icon: "slider.horizontal.3")
+                        }.buttonStyle(.plain)
                     }
 
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    Menu {
                         if item.isVideo {
-                            QuickAction(title: "فيديو → GIF", icon: "photo.stack") { run { await model.videoToGIF(item) } }
-                            QuickAction(title: "استخراج الصوت", icon: "waveform") { run { await model.extractAudio(from: item) } }
-                            QuickAction(title: "تقليل الصوت البشري", icon: "person.wave.2") { run { await model.separateCenterAudio(from: item, keepVoice: false) } }
-                            QuickAction(title: "عزل الكلام", icon: "mic") { run { await model.separateCenterAudio(from: item, keepVoice: true) } }
-                            QuickAction(title: "نسخة 720p", icon: "arrow.down.right.and.arrow.up.left") { run { await model.compress720(from: item) } }
-                            QuickAction(title: "لقطة وسطية", icon: "photo") { run { await model.grabMiddleFrame(from: item) } }
-                            QuickAction(title: "لوحة 9 لقطات", icon: "square.grid.3x3") { run { await model.contactSheet(from: item) } }
-                            NavigationLink { MediaEditorView(sourceURL: item.url, model: model) } label: { QuickActionLabel(title: "قص وتعديل", icon: "slider.horizontal.3") }
+                            Button("استخراج الصوت", systemImage: "waveform") { run { await model.extractAudio(from: item) } }
+                            Button("عزل الكلام", systemImage: "mic") { run { await model.separateCenterAudioFast(from: item, keepVoice: true) } }
+                            Button("تقليل الصوت البشري", systemImage: "person.wave.2") { run { await model.separateCenterAudioFast(from: item, keepVoice: false) } }
                         }
-                        if item.ext == "gif" {
-                            QuickAction(title: "GIF → فيديو", icon: "film") { run { await model.gifToVideo(item) } }
-                        }
-                        if item.isImage || item.isVideo {
-                            QuickAction(title: "تنظيف الخصوصية", icon: "shield") { run { await model.privacyCleanCopy(from: item) } }
-                            QuickAction(title: "إرسال إلى Snapchat", icon: "paperplane") { model.prepareForSnapchat(item) }
-                            QuickAction(title: "حفظ في الصور", icon: "photo.badge.plus") { run { await model.saveExistingToPhotos(item.url) } }
-                        }
-                        QuickAction(title: "اسم مرتب", icon: "textformat") { model.autoRename(item); dismiss() }
-                    }
+                    } label: { CompactTool(title: "الصوت", icon: "waveform") }
 
-                    ShareLink(item: item.url) {
-                        Label("مشاركة للتطبيقات", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity).padding(14)
-                    }.buttonStyle(.borderedProminent)
+                    Menu {
+                        if item.isVideo {
+                            Button("تحويل إلى GIF", systemImage: "photo.stack") { run { await model.videoToGIF(item) } }
+                            Button("نسخة 720p", systemImage: "arrow.down.right.and.arrow.up.left") { run { await model.compress720(from: item) } }
+                            Button("لقطة وسطية", systemImage: "photo") { run { await model.grabMiddleFrame(from: item) } }
+                            Button("لوحة 9 لقطات", systemImage: "square.grid.3x3") { run { await model.contactSheet(from: item) } }
+                        }
+                        if item.ext == "gif" { Button("GIF إلى فيديو", systemImage: "film") { run { await model.gifToVideo(item) } } }
+                        if item.isImage || item.isVideo { Button("تنظيف الخصوصية", systemImage: "shield") { run { await model.privacyCleanCopy(from: item) } } }
+                    } label: { CompactTool(title: "أدوات", icon: "wand.and.stars") }
+
+                    Menu {
+                        if item.isImage || item.isVideo {
+                            Button("حفظ في الصور", systemImage: "photo.badge.plus") { run { await model.saveExistingToPhotos(item.url) } }
+                            Button("Snapchat", systemImage: "paperplane") {
+                                model.prepareForSnapchat(item)
+                                showShare = true
+                            }
+                        }
+                        ShareLink(item: item.url) { Label("مشاركة للتطبيقات", systemImage: "square.and.arrow.up") }
+                    } label: { CompactTool(title: "مشاركة", icon: "square.and.arrow.up") }
+                }
+
+                HStack(spacing: 10) {
+                    Button { model.autoRename(item); dismiss() } label: {
+                        Label("اسم مرتب", systemImage: "textformat").font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 11)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain)
 
                     Button(role: .destructive) {
-                        model.moveToTrash(item)
-                        dismiss()
+                        model.moveToTrash(item); dismiss()
                     } label: {
-                        Label("نقل إلى سلة المهملات", systemImage: "trash")
-                            .frame(maxWidth: .infinity).padding(14)
-                    }
+                        Label("حذف", systemImage: "trash").font(.subheadline).frame(maxWidth: .infinity).padding(.vertical, 11)
+                            .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain)
+                }
 
-                    if busy { ProgressView("جارٍ تنفيذ العملية…").padding(.top, 8) }
-                }.padding(18)
+                if busy {
+                    HStack(spacing: 8) { ProgressView(); Text("جارٍ التنفيذ…").font(.caption).foregroundStyle(.secondary) }
+                }
+                Spacer(minLength: 0)
             }
-            .navigationTitle("أدوات الملف")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("تم") { dismiss() } } }
+            .padding(16)
+            .navigationBarHidden(true)
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.height(260), .medium])
+        .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showShare) { ActivityShareView(items: [item.url]) }
     }
 
     private func run(_ op: @escaping () async -> Void) {
@@ -234,26 +246,16 @@ struct MediaQuickActionsSheet: View {
     }
 }
 
-struct QuickAction: View {
-    let title: String
-    let icon: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) { QuickActionLabel(title: title, icon: icon) }
-        .buttonStyle(.plain)
-    }
-}
-
-struct QuickActionLabel: View {
+struct CompactTool: View {
     let title: String
     let icon: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: icon).font(.title2)
-            Text(title).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 5) {
+            Image(systemName: icon).font(.headline)
+            Text(title).font(.caption2.weight(.medium)).lineLimit(1)
         }
-        .padding(15)
-        .frame(minHeight: 98)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 19))
+        .frame(maxWidth: .infinity)
+        .frame(height: 58)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 15))
     }
 }
