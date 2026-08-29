@@ -12,7 +12,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - SourcesV10
+      - V11
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fahad.Hammel
