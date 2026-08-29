@@ -85,7 +85,7 @@ final class AppModel: ObservableObject {
             let media: [DownloadMedia]
             switch p {
             case .tiktok: media = try await resolveTikTok(source)
-            case .youtube: media = try await resolveYouTube(source)
+            case .youtube: media = try await resolveYouTubeV2(source)
             case .x: media = try await resolveX(source)
             case .instagram: media = try await resolveMeta(source, .instagram)
             case .facebook: media = try await resolveMeta(source, .facebook)
