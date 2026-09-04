@@ -5,14 +5,28 @@
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>4.0</string>
-<key>CFBundleVersion</key><string>40</string>
+<key>CFBundleShortVersionString</key><string>4.1</string>
+<key>CFBundleVersion</key><string>41</string>
 <key>LSRequiresIPhoneOS</key><true/>
-<key>UILaunchScreen</key><dict/>
+<key>UILaunchStoryboardName</key><string>LaunchScreen</string>
 <key>UIRequiresFullScreen</key><true/>
 <key>UIDeviceFamily</key><array><integer>1</integer></array>
 <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+<key>UIApplicationSceneManifest</key>
+<dict>
+  <key>UIApplicationSupportsMultipleScenes</key><false/>
+  <key>UISceneConfigurations</key>
+  <dict>
+    <key>UIWindowSceneSessionRoleApplication</key>
+    <array>
+      <dict>
+        <key>UISceneConfigurationName</key><string>Default Configuration</string>
+        <key>UISceneDelegateClassName</key><string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+      </dict>
+    </array>
+  </dict>
+</dict>
 <key>NSPhotoLibraryUsageDescription</key><string>ScreenFlow lets you choose videos to improve frame rate and quality.</string>
 <key>NSPhotoLibraryAddUsageDescription</key><string>ScreenFlow can save completed videos to your photo library.</string>
 <key>UIApplicationSupportsIndirectInputEvents</key><true/>
