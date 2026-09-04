@@ -8,372 +8,385 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
     private let model = VideoModel()
     private let library = LibraryStore()
 
-    private let scrollView = UIScrollView()
-    private let contentStack = UIStackView()
-    private let previewContainer = UIView()
+    private let topBar = UIView()
+    private let preview = UIView()
     private let previewPlaceholder = UIView()
-    private let previewIcon = UIImageView(image: UIImage(systemName: "video.badge.plus"))
     private let previewTitle = UILabel()
     private let previewMeta = UILabel()
-    private let playerViewController = AVPlayerViewController()
+    private let playerVC = AVPlayerViewController()
+    private var player: AVPlayer?
 
-    private let fpsControl = UISegmentedControl(items: ["24", "30", "60", "120"])
-    private let qualityControl = UISegmentedControl(items: ["Native", "2K", "4K"])
-    private let motionControl = UISegmentedControl(items: ["Fast", "Smooth"])
+    private let controlsScroll = UIScrollView()
+    private let controlsStack = UIStackView()
+    private let fps = UISegmentedControl(items: ["24", "30", "60", "120"])
+    private let resolution = UISegmentedControl(items: ["Native", "2K", "4K"])
+    private let motion = UISegmentedControl(items: ["Fast", "Smooth"])
     private let aiSwitch = UISwitch()
-    private let enhanceButton = UIButton(type: .system)
-    private let progressOverlay = UIView()
-    private let progressRing = UIProgressView(progressViewStyle: .bar)
-    private let progressLabel = UILabel()
+    private let actionButton = UIButton(type: .system)
+
+    private let progressView = UIView()
+    private let progressBar = UIProgressView(progressViewStyle: .bar)
     private let progressPercent = UILabel()
+    private let progressStage = UILabel()
     private var progressTimer: Timer?
 
-    private var currentPlayer: AVPlayer?
-
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
-    override var prefersHomeIndicatorAutoHidden: Bool { false }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        setupLayout()
-        syncControlsFromModel()
+        buildUI()
+        applyDefaults()
     }
 
-    private func setupLayout() {
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.alwaysBounceVertical = true
-        scrollView.showsVerticalScrollIndicator = false
-        scrollView.contentInsetAdjustmentBehavior = .always
-        view.addSubview(scrollView)
-
-        contentStack.axis = .vertical
-        contentStack.spacing = 16
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(contentStack)
-
-        NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 14),
-            contentStack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 18),
-            contentStack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -18),
-            contentStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -128)
-        ])
-
-        contentStack.addArrangedSubview(makeHeader())
-        contentStack.addArrangedSubview(makePreview())
-        contentStack.addArrangedSubview(makeQuickImportRow())
-        contentStack.addArrangedSubview(makeControlCard(title: "Frame Rate", subtitle: "Create smoother motion", control: fpsControl))
-        contentStack.addArrangedSubview(makeControlCard(title: "Resolution", subtitle: "Native detail, 2K, or 4K", control: qualityControl))
-        contentStack.addArrangedSubview(makeAISection())
-        contentStack.addArrangedSubview(makeControlCard(title: "Motion Engine", subtitle: "Smooth synthesizes in-between frames", control: motionControl))
-        contentStack.addArrangedSubview(makeLibraryCard())
-
-        fpsControl.addTarget(self, action: #selector(fpsChanged), for: .valueChanged)
-        qualityControl.addTarget(self, action: #selector(qualityChanged), for: .valueChanged)
-        motionControl.addTarget(self, action: #selector(motionChanged), for: .valueChanged)
-        aiSwitch.addTarget(self, action: #selector(aiChanged), for: .valueChanged)
-
-        setupBottomAction()
-        setupProgressOverlay()
+    private func buildUI() {
+        buildTopBar()
+        buildPreview()
+        buildControls()
+        buildActionButton()
+        buildProgressOverlay()
     }
 
-    private func makeHeader() -> UIView {
-        let wrap = UIView()
+    private func buildTopBar() {
+        topBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(topBar)
+
+        let mark = UIImageView(image: UIImage(systemName: "waveform.path"))
+        mark.tintColor = .white
+        mark.contentMode = .scaleAspectFit
+        mark.translatesAutoresizingMaskIntoConstraints = false
+
         let title = UILabel()
         title.text = "ScreenFlow"
         title.textColor = .white
-        title.font = .systemFont(ofSize: 34, weight: .bold)
+        title.font = .systemFont(ofSize: 28, weight: .bold)
+        title.translatesAutoresizingMaskIntoConstraints = false
 
-        let sub = UILabel()
-        sub.text = "FPS + AI Super Resolution"
-        sub.textColor = UIColor.white.withAlphaComponent(0.48)
-        sub.font = .systemFont(ofSize: 15, weight: .medium)
+        let libraryButton = UIButton(type: .system)
+        var c = UIButton.Configuration.plain()
+        c.image = UIImage(systemName: "square.stack.3d.up.fill")
+        c.baseForegroundColor = .white
+        c.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
+        libraryButton.configuration = c
+        libraryButton.addTarget(self, action: #selector(openLibrary), for: .touchUpInside)
+        libraryButton.translatesAutoresizingMaskIntoConstraints = false
 
-        let badge = UILabel()
-        badge.text = "NATIVE"
-        badge.textColor = .white
-        badge.font = .systemFont(ofSize: 11, weight: .heavy)
-        badge.textAlignment = .center
-        badge.backgroundColor = UIColor.white.withAlphaComponent(0.09)
-        badge.layer.cornerRadius = 15
-        badge.clipsToBounds = true
-
-        [title, sub, badge].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; wrap.addSubview($0) }
+        [mark, title, libraryButton].forEach(topBar.addSubview)
         NSLayoutConstraint.activate([
-            title.topAnchor.constraint(equalTo: wrap.topAnchor),
-            title.leadingAnchor.constraint(equalTo: wrap.leadingAnchor),
-            badge.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-            badge.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
-            badge.widthAnchor.constraint(equalToConstant: 76),
-            badge.heightAnchor.constraint(equalToConstant: 30),
-            sub.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
-            sub.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            sub.bottomAnchor.constraint(equalTo: wrap.bottomAnchor)
+            topBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
+            topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
+            topBar.heightAnchor.constraint(equalToConstant: 46),
+
+            mark.leadingAnchor.constraint(equalTo: topBar.leadingAnchor),
+            mark.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
+            mark.widthAnchor.constraint(equalToConstant: 34),
+            mark.heightAnchor.constraint(equalToConstant: 34),
+
+            title.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 10),
+            title.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
+
+            libraryButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor),
+            libraryButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
+            libraryButton.widthAnchor.constraint(equalToConstant: 44),
+            libraryButton.heightAnchor.constraint(equalToConstant: 44)
         ])
-        return wrap
     }
 
-    private func makePreview() -> UIView {
-        previewContainer.backgroundColor = UIColor(white: 0.055, alpha: 1)
-        previewContainer.layer.cornerRadius = 24
-        previewContainer.layer.cornerCurve = .continuous
-        previewContainer.clipsToBounds = true
-        previewContainer.translatesAutoresizingMaskIntoConstraints = false
-        previewContainer.heightAnchor.constraint(equalToConstant: SFNativeBridge.isModernLargeIPhone() ? 360 : 320).isActive = true
+    private func buildPreview() {
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        preview.backgroundColor = UIColor(white: 0.055, alpha: 1)
+        preview.layer.cornerRadius = 20
+        preview.layer.cornerCurve = .continuous
+        preview.clipsToBounds = true
+        view.addSubview(preview)
 
-        previewPlaceholder.translatesAutoresizingMaskIntoConstraints = false
-        previewContainer.addSubview(previewPlaceholder)
         NSLayoutConstraint.activate([
-            previewPlaceholder.topAnchor.constraint(equalTo: previewContainer.topAnchor),
-            previewPlaceholder.leadingAnchor.constraint(equalTo: previewContainer.leadingAnchor),
-            previewPlaceholder.trailingAnchor.constraint(equalTo: previewContainer.trailingAnchor),
-            previewPlaceholder.bottomAnchor.constraint(equalTo: previewContainer.bottomAnchor)
+            preview.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 10),
+            preview.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            preview.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            preview.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.34)
         ])
 
-        previewIcon.tintColor = .white
-        previewIcon.contentMode = .scaleAspectFit
-        previewIcon.translatesAutoresizingMaskIntoConstraints = false
-        previewTitle.text = "Add a video"
-        previewTitle.font = .systemFont(ofSize: 26, weight: .bold)
+        previewPlaceholder.translatesAutoresizingMaskIntoConstraints = false
+        preview.addSubview(previewPlaceholder)
+        NSLayoutConstraint.activate([
+            previewPlaceholder.topAnchor.constraint(equalTo: preview.topAnchor),
+            previewPlaceholder.leadingAnchor.constraint(equalTo: preview.leadingAnchor),
+            previewPlaceholder.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
+            previewPlaceholder.bottomAnchor.constraint(equalTo: preview.bottomAnchor)
+        ])
+
+        let icon = UIImageView(image: UIImage(systemName: "play.rectangle.on.rectangle"))
+        icon.tintColor = UIColor.white.withAlphaComponent(0.85)
+        icon.contentMode = .scaleAspectFit
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        previewTitle.text = "Choose a video"
         previewTitle.textColor = .white
+        previewTitle.font = .systemFont(ofSize: 24, weight: .bold)
         previewTitle.textAlignment = .center
         previewTitle.translatesAutoresizingMaskIntoConstraints = false
-        previewMeta.text = "Photos or Files"
-        previewMeta.font = .systemFont(ofSize: 15, weight: .medium)
+
+        previewMeta.text = "Tap to import from Photos"
         previewMeta.textColor = UIColor.white.withAlphaComponent(0.45)
+        previewMeta.font = .systemFont(ofSize: 14, weight: .medium)
         previewMeta.textAlignment = .center
         previewMeta.translatesAutoresizingMaskIntoConstraints = false
 
-        previewPlaceholder.addSubview(previewIcon)
-        previewPlaceholder.addSubview(previewTitle)
-        previewPlaceholder.addSubview(previewMeta)
+        let filesButton = UIButton(type: .system)
+        var cfg = UIButton.Configuration.filled()
+        cfg.title = "Files"
+        cfg.image = UIImage(systemName: "folder")
+        cfg.imagePadding = 7
+        cfg.baseBackgroundColor = UIColor.white.withAlphaComponent(0.08)
+        cfg.baseForegroundColor = .white
+        cfg.cornerStyle = .capsule
+        filesButton.configuration = cfg
+        filesButton.addTarget(self, action: #selector(openFiles), for: .touchUpInside)
+        filesButton.translatesAutoresizingMaskIntoConstraints = false
+
+        [icon, previewTitle, previewMeta, filesButton].forEach(previewPlaceholder.addSubview)
         NSLayoutConstraint.activate([
-            previewIcon.centerXAnchor.constraint(equalTo: previewPlaceholder.centerXAnchor),
-            previewIcon.centerYAnchor.constraint(equalTo: previewPlaceholder.centerYAnchor, constant: -42),
-            previewIcon.widthAnchor.constraint(equalToConstant: 56),
-            previewIcon.heightAnchor.constraint(equalToConstant: 56),
-            previewTitle.topAnchor.constraint(equalTo: previewIcon.bottomAnchor, constant: 18),
+            icon.centerXAnchor.constraint(equalTo: previewPlaceholder.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: previewPlaceholder.centerYAnchor, constant: -46),
+            icon.widthAnchor.constraint(equalToConstant: 52),
+            icon.heightAnchor.constraint(equalToConstant: 52),
+
+            previewTitle.topAnchor.constraint(equalTo: icon.bottomAnchor, constant: 14),
             previewTitle.leadingAnchor.constraint(equalTo: previewPlaceholder.leadingAnchor, constant: 20),
             previewTitle.trailingAnchor.constraint(equalTo: previewPlaceholder.trailingAnchor, constant: -20),
-            previewMeta.topAnchor.constraint(equalTo: previewTitle.bottomAnchor, constant: 7),
+
+            previewMeta.topAnchor.constraint(equalTo: previewTitle.bottomAnchor, constant: 5),
             previewMeta.leadingAnchor.constraint(equalTo: previewPlaceholder.leadingAnchor, constant: 20),
-            previewMeta.trailingAnchor.constraint(equalTo: previewPlaceholder.trailingAnchor, constant: -20)
+            previewMeta.trailingAnchor.constraint(equalTo: previewPlaceholder.trailingAnchor, constant: -20),
+
+            filesButton.topAnchor.constraint(equalTo: previewMeta.bottomAnchor, constant: 14),
+            filesButton.centerXAnchor.constraint(equalTo: previewPlaceholder.centerXAnchor),
+            filesButton.heightAnchor.constraint(equalToConstant: 38)
         ])
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(openPhotos))
-        previewPlaceholder.addGestureRecognizer(tap)
-        return previewContainer
+        previewPlaceholder.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openPhotos)))
     }
 
-    private func makeQuickImportRow() -> UIView {
-        let row = UIStackView()
-        row.axis = .horizontal
-        row.spacing = 10
-        row.distribution = .fillEqually
+    private func buildControls() {
+        controlsScroll.translatesAutoresizingMaskIntoConstraints = false
+        controlsScroll.showsVerticalScrollIndicator = false
+        controlsScroll.alwaysBounceVertical = false
+        view.addSubview(controlsScroll)
 
-        let photos = actionButton(title: "Photos", icon: "photo.on.rectangle.angled", primary: true)
-        photos.addTarget(self, action: #selector(openPhotos), for: .touchUpInside)
-        let files = actionButton(title: "Files", icon: "folder", primary: false)
-        files.addTarget(self, action: #selector(openFiles), for: .touchUpInside)
-        row.addArrangedSubview(photos)
-        row.addArrangedSubview(files)
-        row.heightAnchor.constraint(equalToConstant: 58).isActive = true
-        return row
-    }
+        controlsStack.axis = .vertical
+        controlsStack.spacing = 12
+        controlsStack.translatesAutoresizingMaskIntoConstraints = false
+        controlsScroll.addSubview(controlsStack)
 
-    private func makeControlCard(title: String, subtitle: String, control: UISegmentedControl) -> UIView {
-        let card = cardView()
-        let stack = UIStackView()
-        stack.axis = .vertical
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-
-        let t = UILabel()
-        t.text = title
-        t.textColor = .white
-        t.font = .systemFont(ofSize: 20, weight: .bold)
-        let s = UILabel()
-        s.text = subtitle
-        s.textColor = UIColor.white.withAlphaComponent(0.42)
-        s.font = .systemFont(ofSize: 13, weight: .medium)
-        control.selectedSegmentTintColor = .white
-        control.setTitleTextAttributes([.foregroundColor: UIColor.black, .font: UIFont.systemFont(ofSize: 15, weight: .bold)], for: .selected)
-        control.setTitleTextAttributes([.foregroundColor: UIColor.white.withAlphaComponent(0.58), .font: UIFont.systemFont(ofSize: 15, weight: .semibold)], for: .normal)
-        control.backgroundColor = UIColor.white.withAlphaComponent(0.05)
-        control.heightAnchor.constraint(equalToConstant: 48).isActive = true
-
-        stack.addArrangedSubview(t)
-        stack.addArrangedSubview(s)
-        stack.addArrangedSubview(control)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18)
+            controlsScroll.topAnchor.constraint(equalTo: preview.bottomAnchor, constant: 12),
+            controlsScroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controlsScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            controlsScroll.bottomAnchor.constraint(equalTo: actionButton.topAnchor, constant: -10),
+
+            controlsStack.topAnchor.constraint(equalTo: controlsScroll.contentLayoutGuide.topAnchor),
+            controlsStack.bottomAnchor.constraint(equalTo: controlsScroll.contentLayoutGuide.bottomAnchor),
+            controlsStack.leadingAnchor.constraint(equalTo: controlsScroll.frameLayoutGuide.leadingAnchor, constant: 16),
+            controlsStack.trailingAnchor.constraint(equalTo: controlsScroll.frameLayoutGuide.trailingAnchor, constant: -16)
         ])
-        return card
+
+        [fps, resolution, motion].forEach(configureSegmented)
+        fps.addTarget(self, action: #selector(fpsChanged), for: .valueChanged)
+        resolution.addTarget(self, action: #selector(resolutionChanged), for: .valueChanged)
+        motion.addTarget(self, action: #selector(motionChanged), for: .valueChanged)
+        aiSwitch.addTarget(self, action: #selector(aiChanged), for: .valueChanged)
+
+        controlsStack.addArrangedSubview(optionRow(title: "Frame rate", subtitle: "Output motion", control: fps))
+        controlsStack.addArrangedSubview(optionRow(title: "Resolution", subtitle: "Output size", control: resolution))
+        controlsStack.addArrangedSubview(toggleRow())
+        controlsStack.addArrangedSubview(optionRow(title: "Motion", subtitle: "Interpolation", control: motion))
     }
 
-    private func makeAISection() -> UIView {
-        let card = cardView()
+    private func configureSegmented(_ control: UISegmentedControl) {
+        control.selectedSegmentTintColor = .white
+        control.backgroundColor = UIColor.white.withAlphaComponent(0.055)
+        control.setTitleTextAttributes([.foregroundColor: UIColor.black, .font: UIFont.systemFont(ofSize: 14, weight: .bold)], for: .selected)
+        control.setTitleTextAttributes([.foregroundColor: UIColor.white.withAlphaComponent(0.6), .font: UIFont.systemFont(ofSize: 14, weight: .semibold)], for: .normal)
+        control.heightAnchor.constraint(equalToConstant: 42).isActive = true
+    }
+
+    private func optionRow(title: String, subtitle: String, control: UIView) -> UIView {
+        let container = UIView()
+        container.backgroundColor = UIColor(white: 0.055, alpha: 1)
+        container.layer.cornerRadius = 18
+        container.layer.cornerCurve = .continuous
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.heightAnchor.constraint(equalToConstant: 92).isActive = true
+
+        let titleLabel = UILabel()
+        titleLabel.text = title
+        titleLabel.textColor = .white
+        titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let subtitleLabel = UILabel()
+        subtitleLabel.text = subtitle
+        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.38)
+        subtitleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        control.translatesAutoresizingMaskIntoConstraints = false
+        [titleLabel, subtitleLabel, control].forEach(container.addSubview)
+
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            titleLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 15),
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
+            subtitleLabel.widthAnchor.constraint(equalToConstant: 90),
+
+            control.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 126),
+            control.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            control.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+        return container
+    }
+
+    private func toggleRow() -> UIView {
+        let container = UIView()
+        container.backgroundColor = UIColor(white: 0.055, alpha: 1)
+        container.layer.cornerRadius = 18
+        container.layer.cornerCurve = .continuous
+        container.heightAnchor.constraint(equalToConstant: 78).isActive = true
+
         let icon = UIImageView(image: UIImage(systemName: "brain.head.profile"))
         icon.tintColor = .white
+        icon.contentMode = .scaleAspectFit
         icon.translatesAutoresizingMaskIntoConstraints = false
+
         let title = UILabel()
         title.text = "AI Super Resolution"
         title.textColor = .white
-        title.font = .systemFont(ofSize: 20, weight: .bold)
+        title.font = .systemFont(ofSize: 18, weight: .bold)
+        title.adjustsFontSizeToFitWidth = true
+        title.minimumScaleFactor = 0.78
         title.translatesAutoresizingMaskIntoConstraints = false
+
         let sub = UILabel()
-        sub.text = "Core ML detail recovery before final upscale"
-        sub.textColor = UIColor.white.withAlphaComponent(0.42)
-        sub.font = .systemFont(ofSize: 13, weight: .medium)
-        sub.numberOfLines = 2
+        sub.text = "Core ML detail recovery"
+        sub.textColor = UIColor.white.withAlphaComponent(0.4)
+        sub.font = .systemFont(ofSize: 12, weight: .medium)
         sub.translatesAutoresizingMaskIntoConstraints = false
+
         aiSwitch.onTintColor = .white
         aiSwitch.thumbTintColor = .black
         aiSwitch.translatesAutoresizingMaskIntoConstraints = false
 
-        [icon, title, sub, aiSwitch].forEach(card.addSubview)
+        [icon, title, sub, aiSwitch].forEach(container.addSubview)
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
-            icon.centerYAnchor.constraint(equalTo: card.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 34),
-            icon.heightAnchor.constraint(equalToConstant: 34),
-            title.topAnchor.constraint(equalTo: card.topAnchor, constant: 18),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 14),
+            icon.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            icon.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 32),
+            icon.heightAnchor.constraint(equalToConstant: 32),
+
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
             title.trailingAnchor.constraint(lessThanOrEqualTo: aiSwitch.leadingAnchor, constant: -12),
-            sub.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
+            title.topAnchor.constraint(equalTo: container.topAnchor, constant: 15),
             sub.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            sub.trailingAnchor.constraint(equalTo: aiSwitch.leadingAnchor, constant: -12),
-            sub.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -18),
-            aiSwitch.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
-            aiSwitch.centerYAnchor.constraint(equalTo: card.centerYAnchor)
+            sub.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
+
+            aiSwitch.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            aiSwitch.centerYAnchor.constraint(equalTo: container.centerYAnchor)
         ])
-        return card
+        return container
     }
 
-    private func makeLibraryCard() -> UIView {
-        let button = actionButton(title: "Open ScreenFlow Library", icon: "square.stack.3d.up.fill", primary: false)
-        button.addTarget(self, action: #selector(openLibrary), for: .touchUpInside)
-        button.heightAnchor.constraint(equalToConstant: 58).isActive = true
-        return button
-    }
+    private func buildActionButton() {
+        actionButton.translatesAutoresizingMaskIntoConstraints = false
+        var cfg = UIButton.Configuration.filled()
+        cfg.title = "Choose a Video"
+        cfg.image = UIImage(systemName: "wand.and.stars")
+        cfg.imagePadding = 10
+        cfg.baseBackgroundColor = .white
+        cfg.baseForegroundColor = .black
+        cfg.cornerStyle = .large
+        actionButton.configuration = cfg
+        actionButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
+        actionButton.addTarget(self, action: #selector(convertTapped), for: .touchUpInside)
+        view.addSubview(actionButton)
 
-    private func setupBottomAction() {
-        enhanceButton.translatesAutoresizingMaskIntoConstraints = false
-        enhanceButton.configuration = .filled()
-        enhanceButton.configuration?.baseBackgroundColor = .white
-        enhanceButton.configuration?.baseForegroundColor = .black
-        enhanceButton.configuration?.cornerStyle = .large
-        enhanceButton.configuration?.image = UIImage(systemName: "wand.and.stars")
-        enhanceButton.configuration?.imagePadding = 10
-        enhanceButton.configuration?.title = "Enhance Video"
-        enhanceButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
-        enhanceButton.addTarget(self, action: #selector(convertTapped), for: .touchUpInside)
-        view.addSubview(enhanceButton)
         NSLayoutConstraint.activate([
-            enhanceButton.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18),
-            enhanceButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -18),
-            enhanceButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -10),
-            enhanceButton.heightAnchor.constraint(equalToConstant: 62)
+            actionButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            actionButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            actionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
+            actionButton.heightAnchor.constraint(equalToConstant: 60)
         ])
-        updateConvertButton()
     }
 
-    private func setupProgressOverlay() {
-        progressOverlay.translatesAutoresizingMaskIntoConstraints = false
-        progressOverlay.backgroundColor = UIColor.black.withAlphaComponent(0.92)
-        progressOverlay.alpha = 0
-        progressOverlay.isHidden = true
-        view.addSubview(progressOverlay)
+    private func buildProgressOverlay() {
+        progressView.translatesAutoresizingMaskIntoConstraints = false
+        progressView.backgroundColor = UIColor.black.withAlphaComponent(0.96)
+        progressView.alpha = 0
+        progressView.isHidden = true
+        view.addSubview(progressView)
         NSLayoutConstraint.activate([
-            progressOverlay.topAnchor.constraint(equalTo: view.topAnchor),
-            progressOverlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            progressOverlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            progressOverlay.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            progressView.topAnchor.constraint(equalTo: view.topAnchor),
+            progressView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            progressView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
 
         progressPercent.textColor = .white
-        progressPercent.font = .systemFont(ofSize: 56, weight: .bold)
+        progressPercent.font = .systemFont(ofSize: 64, weight: .bold)
         progressPercent.textAlignment = .center
         progressPercent.translatesAutoresizingMaskIntoConstraints = false
-        progressLabel.textColor = UIColor.white.withAlphaComponent(0.65)
-        progressLabel.font = .systemFont(ofSize: 17, weight: .semibold)
-        progressLabel.textAlignment = .center
-        progressLabel.numberOfLines = 2
-        progressLabel.translatesAutoresizingMaskIntoConstraints = false
-        progressRing.progressTintColor = .white
-        progressRing.trackTintColor = UIColor.white.withAlphaComponent(0.12)
-        progressRing.translatesAutoresizingMaskIntoConstraints = false
 
-        [progressPercent, progressLabel, progressRing].forEach(progressOverlay.addSubview)
+        progressStage.textColor = UIColor.white.withAlphaComponent(0.62)
+        progressStage.font = .systemFont(ofSize: 16, weight: .semibold)
+        progressStage.textAlignment = .center
+        progressStage.numberOfLines = 2
+        progressStage.translatesAutoresizingMaskIntoConstraints = false
+
+        progressBar.progressTintColor = .white
+        progressBar.trackTintColor = UIColor.white.withAlphaComponent(0.12)
+        progressBar.translatesAutoresizingMaskIntoConstraints = false
+
+        [progressPercent, progressStage, progressBar].forEach(progressView.addSubview)
         NSLayoutConstraint.activate([
-            progressPercent.centerXAnchor.constraint(equalTo: progressOverlay.centerXAnchor),
-            progressPercent.centerYAnchor.constraint(equalTo: progressOverlay.centerYAnchor, constant: -34),
-            progressLabel.topAnchor.constraint(equalTo: progressPercent.bottomAnchor, constant: 14),
-            progressLabel.leadingAnchor.constraint(equalTo: progressOverlay.leadingAnchor, constant: 34),
-            progressLabel.trailingAnchor.constraint(equalTo: progressOverlay.trailingAnchor, constant: -34),
-            progressRing.topAnchor.constraint(equalTo: progressLabel.bottomAnchor, constant: 28),
-            progressRing.leadingAnchor.constraint(equalTo: progressOverlay.leadingAnchor, constant: 54),
-            progressRing.trailingAnchor.constraint(equalTo: progressOverlay.trailingAnchor, constant: -54)
+            progressPercent.centerXAnchor.constraint(equalTo: progressView.centerXAnchor),
+            progressPercent.centerYAnchor.constraint(equalTo: progressView.centerYAnchor, constant: -28),
+            progressStage.topAnchor.constraint(equalTo: progressPercent.bottomAnchor, constant: 12),
+            progressStage.leadingAnchor.constraint(equalTo: progressView.leadingAnchor, constant: 30),
+            progressStage.trailingAnchor.constraint(equalTo: progressView.trailingAnchor, constant: -30),
+            progressBar.topAnchor.constraint(equalTo: progressStage.bottomAnchor, constant: 26),
+            progressBar.leadingAnchor.constraint(equalTo: progressView.leadingAnchor, constant: 54),
+            progressBar.trailingAnchor.constraint(equalTo: progressView.trailingAnchor, constant: -54)
         ])
     }
 
-    private func cardView() -> UIView {
-        let v = UIView()
-        v.backgroundColor = UIColor(white: 0.055, alpha: 1)
-        v.layer.cornerRadius = 22
-        v.layer.cornerCurve = .continuous
-        v.layer.borderColor = UIColor.white.withAlphaComponent(0.06).cgColor
-        v.layer.borderWidth = 1
-        return v
-    }
-
-    private func actionButton(title: String, icon: String, primary: Bool) -> UIButton {
-        let b = UIButton(type: .system)
-        var config = UIButton.Configuration.filled()
-        config.title = title
-        config.image = UIImage(systemName: icon)
-        config.imagePadding = 9
-        config.baseBackgroundColor = primary ? .white : UIColor.white.withAlphaComponent(0.07)
-        config.baseForegroundColor = primary ? .black : .white
-        config.cornerStyle = .large
-        b.configuration = config
-        b.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold)
-        return b
-    }
-
-    private func syncControlsFromModel() {
-        fpsControl.selectedSegmentIndex = 2
-        qualityControl.selectedSegmentIndex = 2
-        motionControl.selectedSegmentIndex = 1
+    private func applyDefaults() {
+        fps.selectedSegmentIndex = 2
+        resolution.selectedSegmentIndex = 2
+        motion.selectedSegmentIndex = 1
         aiSwitch.isOn = true
         model.targetFPS = 60
         model.quality = .fourK
         model.mode = .smooth
         model.upscaleEngine = .ai
+        updateActionTitle()
     }
 
     @objc private func fpsChanged() {
-        model.targetFPS = [24, 30, 60, 120][fpsControl.selectedSegmentIndex]
+        model.targetFPS = [24, 30, 60, 120][fps.selectedSegmentIndex]
         SFNativeBridge.impactSelection()
-        updateConvertButton()
+        updateActionTitle()
     }
 
-    @objc private func qualityChanged() {
-        model.quality = [.enhanced, .twoK, .fourK][qualityControl.selectedSegmentIndex]
+    @objc private func resolutionChanged() {
+        model.quality = [.enhanced, .twoK, .fourK][resolution.selectedSegmentIndex]
         SFNativeBridge.impactSelection()
-        updateConvertButton()
+        updateActionTitle()
     }
 
     @objc private func motionChanged() {
-        model.mode = motionControl.selectedSegmentIndex == 1 ? .smooth : .simple
+        model.mode = motion.selectedSegmentIndex == 1 ? .smooth : .simple
         SFNativeBridge.impactSelection()
     }
 
@@ -382,9 +395,13 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         SFNativeBridge.impactSelection()
     }
 
-    private func updateConvertButton() {
-        let quality = qualityControl.selectedSegmentIndex == 0 ? "Native" : (qualityControl.selectedSegmentIndex == 1 ? "2K" : "4K")
-        enhanceButton.configuration?.title = model.input == nil ? "Choose a Video" : "Enhance · \(model.targetFPS) FPS · \(quality)"
+    private func updateActionTitle() {
+        guard model.input != nil else {
+            actionButton.configuration?.title = "Choose a Video"
+            return
+        }
+        let q = ["Native", "2K", "4K"][resolution.selectedSegmentIndex]
+        actionButton.configuration?.title = "Enhance · \(model.targetFPS) FPS · \(q)"
     }
 
     @objc private func openPhotos() {
@@ -408,10 +425,10 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         picker.dismiss(animated: true)
         guard let provider = results.first?.itemProvider else { return }
         let type = provider.registeredTypeIdentifiers.first ?? UTType.movie.identifier
-        provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, error in
+        provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, _ in
             guard let self, let url else { return }
             let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension
-            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("screenflow_input_\(UUID().uuidString).\(ext)")
+            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("screenflow_\(UUID().uuidString).\(ext)")
             try? FileManager.default.removeItem(at: copy)
             do {
                 try FileManager.default.copyItem(at: url, to: copy)
@@ -433,21 +450,24 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
             showError(model.errorText ?? "Could not read this video.")
             return
         }
+
         previewPlaceholder.isHidden = true
-        currentPlayer = AVPlayer(url: info.url)
-        playerViewController.player = currentPlayer
-        addChild(playerViewController)
-        let pv = playerViewController.view!
-        pv.translatesAutoresizingMaskIntoConstraints = false
-        previewContainer.addSubview(pv)
-        NSLayoutConstraint.activate([
-            pv.topAnchor.constraint(equalTo: previewContainer.topAnchor),
-            pv.leadingAnchor.constraint(equalTo: previewContainer.leadingAnchor),
-            pv.trailingAnchor.constraint(equalTo: previewContainer.trailingAnchor),
-            pv.bottomAnchor.constraint(equalTo: previewContainer.bottomAnchor)
-        ])
-        playerViewController.didMove(toParent: self)
-        updateConvertButton()
+        player?.pause()
+        player = AVPlayer(url: info.url)
+        playerVC.player = player
+        if playerVC.parent == nil {
+            addChild(playerVC)
+            playerVC.view.translatesAutoresizingMaskIntoConstraints = false
+            preview.addSubview(playerVC.view)
+            NSLayoutConstraint.activate([
+                playerVC.view.topAnchor.constraint(equalTo: preview.topAnchor),
+                playerVC.view.leadingAnchor.constraint(equalTo: preview.leadingAnchor),
+                playerVC.view.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
+                playerVC.view.bottomAnchor.constraint(equalTo: preview.bottomAnchor)
+            ])
+            playerVC.didMove(toParent: self)
+        }
+        updateActionTitle()
         SFNativeBridge.impactSuccess()
     }
 
@@ -461,44 +481,41 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
                 showError(error)
             } else if let out = model.output {
                 SFNativeBridge.impactSuccess()
-                showCompletion(out)
+                let alert = UIAlertController(title: "Saved to Library", message: "\(out.resolutionText) · \(out.fpsText) · \(out.sizeText)", preferredStyle: .actionSheet)
+                alert.addAction(UIAlertAction(title: "Save to Photos", style: .default) { _ in self.model.saveToPhotos() })
+                alert.addAction(UIAlertAction(title: "Open Library", style: .default) { _ in self.openLibrary() })
+                alert.addAction(UIAlertAction(title: "Done", style: .cancel))
+                if let pop = alert.popoverPresentationController { pop.sourceView = self.actionButton; pop.sourceRect = self.actionButton.bounds }
+                self.present(alert, animated: true)
             }
         }
     }
 
     private func showProgress() {
-        progressOverlay.isHidden = false
-        UIView.animate(withDuration: 0.2) { self.progressOverlay.alpha = 1 }
+        progressView.isHidden = false
+        UIView.animate(withDuration: 0.18) { self.progressView.alpha = 1 }
         progressTimer?.invalidate()
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let p = Float(max(0, min(1, self.model.progress)))
-            self.progressRing.setProgress(p, animated: true)
-            self.progressPercent.text = "\(Int(p * 100))%"
-            self.progressLabel.text = self.model.stageText.isEmpty ? "Processing on-device" : self.model.stageText
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let p = Float(max(0, min(1, self.model.progress)))
+                self.progressBar.setProgress(p, animated: true)
+                self.progressPercent.text = "\(Int(p * 100))%"
+                self.progressStage.text = self.model.stageText.isEmpty ? "Processing on-device" : self.model.stageText
+            }
         }
     }
 
     private func hideProgress() {
         progressTimer?.invalidate()
         progressTimer = nil
-        UIView.animate(withDuration: 0.2, animations: { self.progressOverlay.alpha = 0 }) { _ in
-            self.progressOverlay.isHidden = true
+        UIView.animate(withDuration: 0.18, animations: { self.progressView.alpha = 0 }) { _ in
+            self.progressView.isHidden = true
         }
     }
 
-    private func showCompletion(_ info: VideoModel.Info) {
-        let alert = UIAlertController(title: "Saved to Library", message: "\(info.resolutionText) · \(info.fpsText) · \(info.sizeText)", preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Save to Photos", style: .default) { _ in self.model.saveToPhotos() })
-        alert.addAction(UIAlertAction(title: "Open Library", style: .default) { _ in self.openLibrary() })
-        alert.addAction(UIAlertAction(title: "Done", style: .cancel))
-        if let pop = alert.popoverPresentationController { pop.sourceView = enhanceButton; pop.sourceRect = enhanceButton.bounds }
-        present(alert, animated: true)
-    }
-
     @objc private func openLibrary() {
-        let vc = LibraryViewController(store: library)
-        let nav = UINavigationController(rootViewController: vc)
+        let nav = UINavigationController(rootViewController: LibraryViewController(store: library))
         nav.modalPresentationStyle = .fullScreen
         present(nav, animated: true)
     }
