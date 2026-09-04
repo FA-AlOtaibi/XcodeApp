@@ -6,7 +6,7 @@ import FFmpegSupport
 @MainActor
 final class VideoModel: ObservableObject {
     enum Mode: String, CaseIterable, Identifiable {
-        case simple = "Simple"
+        case simple = "Fast"
         case smooth = "Smooth"
         var id: String { rawValue }
     }
@@ -18,6 +18,12 @@ final class VideoModel: ObservableObject {
         var id: String { rawValue }
     }
 
+    enum UpscaleEngine: String, CaseIterable, Identifiable {
+        case standard = "Standard"
+        case ai = "AI Super Resolution"
+        var id: String { rawValue }
+    }
+
     struct Info {
         let url: URL
         let name: String
@@ -26,11 +32,7 @@ final class VideoModel: ObservableObject {
         let width: Int
         let height: Int
         let bytes: Int64
-
-        var durationText: String {
-            let s = Int(duration.rounded())
-            return String(format: "%d:%02d", s / 60, s % 60)
-        }
+        var durationText: String { let s = Int(duration.rounded()); return String(format: "%d:%02d", s / 60, s % 60) }
         var sizeText: String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
         var resolutionText: String { "\(width)×\(height)" }
         var fpsText: String { fps > 0 ? String(format: "%.2f FPS", fps) : "Unknown FPS" }
@@ -38,11 +40,13 @@ final class VideoModel: ObservableObject {
 
     @Published var input: Info?
     @Published var output: Info?
-    @Published var targetFPS: Int = 60
+    @Published var targetFPS = 60
     @Published var mode: Mode = .smooth
     @Published var quality: Quality = .twoK
+    @Published var upscaleEngine: UpscaleEngine = .ai
     @Published var isProcessing = false
     @Published var stageText = ""
+    @Published var progress: Double = 0
     @Published var errorText: String?
     @Published var showSaved = false
 
@@ -59,111 +63,95 @@ final class VideoModel: ObservableObject {
             let fps = Double(try await track.load(.nominalFrameRate))
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-            return Info(url: url,
-                        name: url.lastPathComponent,
-                        duration: duration.isFinite ? duration : 0,
-                        fps: fps,
-                        width: Int(abs(oriented.width)),
-                        height: Int(abs(oriented.height)),
-                        bytes: bytes)
+            return Info(url: url, name: url.lastPathComponent, duration: duration.isFinite ? duration : 0,
+                        fps: fps, width: Int(abs(oriented.width)), height: Int(abs(oriented.height)), bytes: bytes)
         } catch { return nil }
     }
 
     func setInput(url: URL) async {
-        errorText = nil
-        output = nil
+        errorText = nil; output = nil; progress = 0
         input = await inspect(url: url)
         if input == nil { errorText = "Could not read this video." }
     }
 
-    private func even(_ value: Int) -> Int { max(2, value / 2 * 2) }
+    private func even(_ v: Int) -> Int { max(2, v / 2 * 2) }
 
     private func outputSize(for input: Info) -> (Int, Int) {
-        let longEdgeTarget: Int
+        let target: Int
         switch quality {
-        case .enhanced:
-            return (even(input.width), even(input.height))
-        case .twoK:
-            longEdgeTarget = 2560
-        case .fourK:
-            longEdgeTarget = 3840
+        case .enhanced: return (even(input.width), even(input.height))
+        case .twoK: target = 2560
+        case .fourK: target = 3840
         }
-
         let currentLong = max(input.width, input.height)
-        if currentLong >= longEdgeTarget {
-            return (even(input.width), even(input.height))
-        }
-
-        let ratio = Double(longEdgeTarget) / Double(max(1, currentLong))
+        if currentLong >= target { return (even(input.width), even(input.height)) }
+        let ratio = Double(target) / Double(max(1, currentLong))
         return (even(Int(Double(input.width) * ratio)), even(Int(Double(input.height) * ratio)))
     }
 
     func convert() async {
         guard let input else { return }
-        isProcessing = true
-        output = nil
-        errorText = nil
-        stageText = mode == .smooth ? "Analyzing motion and enhancing video…" : "Enhancing video and converting frame rate…"
+        isProcessing = true; output = nil; errorText = nil; progress = 0
         defer { isProcessing = false }
 
-        let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FPS_\(targetFPS)_\(quality.rawValue)_\(UUID().uuidString).mp4")
-        try? FileManager.default.removeItem(at: out)
+        let finalURL = FileManager.default.temporaryDirectory.appendingPathComponent("FPS_Quality_\(UUID().uuidString).mp4")
+        try? FileManager.default.removeItem(at: finalURL)
+        var videoSource = input.url
+        var aiTemp: URL?
+
+        if upscaleEngine == .ai {
+            stageText = "AI Super Resolution · Apple Neural Engine"
+            do {
+                let sr = AISuperResolution()
+                let temp = try await sr.process(sourceURL: input.url) { p in
+                    Task { @MainActor in self.progress = p * 0.72 }
+                }
+                videoSource = temp
+                aiTemp = temp
+            } catch {
+                errorText = "AI Super Resolution could not process this clip. Try Standard mode for this video."
+                return
+            }
+        }
 
         let (outW, outH) = outputSize(for: input)
-
         var filters: [String] = []
-        if mode == .simple {
-            filters.append("fps=\(targetFPS)")
-        } else {
-            filters.append("minterpolate=fps=\(targetFPS):mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1")
+        filters.append(mode == .smooth
+            ? "minterpolate=fps=\(targetFPS):mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+            : "fps=\(targetFPS)")
+
+        if upscaleEngine == .standard {
+            filters.append("hqdn3d=0.8:0.8:3:3")
         }
-
-        // Mild denoise keeps compression artifacts from being magnified by upscaling.
-        filters.append("hqdn3d=1.1:1.1:5:5")
-
-        if outW != input.width || outH != input.height {
-            filters.append("scale=\(outW):\(outH):flags=lanczos")
-        }
-
-        // Conservative detail recovery; avoids the harsh halo look of aggressive sharpening.
-        filters.append("unsharp=5:5:0.55:5:5:0.0")
-        let videoFilter = filters.joined(separator: ",")
+        filters.append("scale=\(outW):\(outH):flags=lanczos")
+        if upscaleEngine == .standard { filters.append("unsharp=5:5:0.35:5:5:0") }
+        let vf = filters.joined(separator: ",")
 
         let outputPixels = max(1, outW * outH)
         let fpsFactor = max(1.0, Double(targetFPS) / 30.0)
-        let mbpsPer1080p30: Double
-        switch quality {
-        case .enhanced: mbpsPer1080p30 = 16.0
-        case .twoK: mbpsPer1080p30 = 20.0
-        case .fourK: mbpsPer1080p30 = 24.0
-        }
-        let baseMbps = max(12.0, min(95.0, Double(outputPixels) / 2_073_600.0 * mbpsPer1080p30 * sqrt(fpsFactor)))
-        let bitrate = "\(Int(baseMbps * 1_000_000))"
+        let base = quality == .fourK ? 26.0 : (quality == .twoK ? 21.0 : 17.0)
+        let mbps = max(14.0, min(110.0, Double(outputPixels) / 2_073_600.0 * base * sqrt(fpsFactor)))
+        let bitrate = "\(Int(mbps * 1_000_000))"
 
+        stageText = "Creating \(targetFPS) FPS · \(quality.rawValue)"
+        progress = max(progress, 0.74)
         let args = [
-            "ffmpeg", "-y", "-i", input.url.path,
-            "-vf", videoFilter,
-            "-c:v", "h264_videotoolbox",
-            "-b:v", bitrate,
-            "-maxrate", bitrate,
-            "-bufsize", "\(Int(baseMbps * 2_000_000))",
-            "-c:a", "aac", "-b:a", "256k",
-            "-movflags", "+faststart",
-            out.path
+            "ffmpeg", "-y", "-i", videoSource.path, "-i", input.url.path,
+            "-map", "0:v:0", "-map", "1:a?", "-vf", vf,
+            "-c:v", "h264_videotoolbox", "-b:v", bitrate, "-maxrate", bitrate,
+            "-bufsize", "\(Int(mbps * 2_000_000))", "-c:a", "aac", "-b:a", "256k",
+            "-movflags", "+faststart", finalURL.path
         ]
 
-        stageText = "Creating \(targetFPS) FPS · \(quality.rawValue) output…"
-        let code: Int = await Task.detached(priority: .userInitiated) { () -> Int in
-            FFmpegSupport.ffmpeg(args)
-        }.value
-
-        guard code == 0, FileManager.default.fileExists(atPath: out.path) else {
-            errorText = "Conversion failed. 4K + 120 FPS is extremely demanding; try 4K/60 or 2K/120 for this clip."
+        let code: Int = await Task.detached(priority: .userInitiated) { FFmpegSupport.ffmpeg(args) }.value
+        if let aiTemp { try? FileManager.default.removeItem(at: aiTemp) }
+        guard code == 0, FileManager.default.fileExists(atPath: finalURL.path) else {
+            errorText = "Conversion failed. 4K + 120 FPS is very demanding; try 4K/60 or 2K/120."
             return
         }
-        stageText = "Finishing high-quality MP4…"
-        output = await inspect(url: out)
+        progress = 1
+        stageText = "Done"
+        output = await inspect(url: finalURL)
     }
 
     func saveToPhotos() {
@@ -172,9 +160,7 @@ final class VideoModel: ObservableObject {
             guard status == .authorized || status == .limited else { return }
             PHPhotoLibrary.shared().performChanges {
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-            } completionHandler: { success, _ in
-                Task { @MainActor in self.showSaved = success }
-            }
+            } completionHandler: { success, _ in Task { @MainActor in self.showSaved = success } }
         }
     }
 }
