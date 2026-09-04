@@ -2,7 +2,7 @@ name: FPSConverter
 options:
   bundleIdPrefix: com.fahad
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "16.0"
 packages:
   FFmpegIOS:
     url: https://github.com/kewlbear/FFmpeg-iOS.git
@@ -24,3 +24,5 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.fahad.fpsconverter
         GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
