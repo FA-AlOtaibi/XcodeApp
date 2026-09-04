@@ -105,8 +105,8 @@ final class VideoModel: ObservableObject {
         ]
 
         stageText = mode == .smooth ? "Smooth conversion in progress…" : "Fast conversion in progress…"
-        let code: Int32 = await Task.detached(priority: .userInitiated) {
-            ffmpeg(args)
+        let code: Int = await Task.detached(priority: .userInitiated) { () -> Int in
+            FFmpegSupport.ffmpeg(args)
         }.value
 
         guard code == 0, FileManager.default.fileExists(atPath: out.path) else {
