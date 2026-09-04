@@ -12,9 +12,9 @@ struct ContentView: View {
                 VStack(spacing: 26) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("← Back to Tools").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                        Text("FPS Converter: Change Video Frame Rate")
+                        Text("FPS + Quality Converter")
                             .font(.system(size: 34, weight: .bold, design: .rounded)).tracking(-1)
-                        Text("Upload a video, pick a target frame rate, and download it converted. Simple mode is fast; Smooth mode creates real in-between frames.")
+                        Text("Increase frame rate and improve video quality in one export. Smooth mode creates in-between frames, while 2K/4K modes upscale with high-quality Lanczos filtering, light denoise, sharpening, and a higher bitrate.")
                             .font(.body).foregroundStyle(.secondary).lineSpacing(4)
                     }.frame(maxWidth: .infinity, alignment: .leading)
 
@@ -41,6 +41,7 @@ struct ContentView: View {
                                 Spacer()
                             }
                             Divider()
+
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Target frame rate").font(.headline)
                                 HStack(spacing: 8) {
@@ -55,12 +56,22 @@ struct ContentView: View {
                                     }
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
+
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Conversion mode").font(.headline)
+                                Text("Output quality").font(.headline)
+                                Picker("Quality", selection: $model.quality) {
+                                    ForEach(VideoModel.Quality.allCases) { Text($0.rawValue).tag($0) }
+                                }.pickerStyle(.segmented)
+                                Text(qualityDescription)
+                                    .font(.caption).foregroundStyle(.secondary).lineSpacing(3)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Frame conversion").font(.headline)
                                 Picker("Mode", selection: $model.mode) {
                                     ForEach(VideoModel.Mode.allCases) { Text($0.rawValue).tag($0) }
                                 }.pickerStyle(.segmented)
-                                Text(model.mode == .simple ? "Fast: drops or duplicates frames." : "Motion-compensated interpolation: generates new frames between originals for genuinely smoother motion.")
+                                Text(model.mode == .simple ? "Fast: drops or duplicates frames." : "Motion-compensated interpolation: creates new in-between frames for genuinely smoother motion.")
                                     .font(.caption).foregroundStyle(.secondary).lineSpacing(3)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -70,8 +81,11 @@ struct ContentView: View {
                         Button {
                             Task { await model.convert() }
                         } label: {
-                            HStack { Image(systemName: "wand.and.stars"); Text("Convert to \(model.targetFPS) FPS") }
-                                .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white).background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                            HStack {
+                                Image(systemName: "wand.and.stars")
+                                Text("Convert · \(model.targetFPS) FPS · \(model.quality.rawValue)")
+                            }
+                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 16).foregroundStyle(.white).background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
                         }.disabled(model.isProcessing)
                     }
 
@@ -79,7 +93,8 @@ struct ContentView: View {
                         VStack(spacing: 14) {
                             ProgressView().controlSize(.large)
                             Text(model.stageText).font(.headline).multilineTextAlignment(.center)
-                            if model.mode == .smooth { Text("Smooth mode is CPU-intensive and may take much longer than the clip duration.").font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+                            Text("Smooth + 4K can take a long time because motion interpolation is performed before the high-quality upscale.")
+                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                         }.frame(maxWidth: .infinity).padding(24).background(.white).clipShape(RoundedRectangle(cornerRadius: 14))
                     }
 
@@ -95,10 +110,11 @@ struct ContentView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Simple vs Smooth").font(.title2.bold())
-                        Text("Simple mode uses frame dropping/duplication. Smooth mode analyzes motion and synthesizes in-between frames, which is best for 24→60 or 30→60 FPS.")
+                        Text("What quality mode actually does").font(.title2.bold())
+                        Text("Enhanced keeps the original dimensions but cleans and sharpens the image and exports at a higher bitrate. 2K and 4K also upscale the frame using Lanczos before export.")
                             .foregroundStyle(.secondary).lineSpacing(4)
-                        Text("Everything is processed locally on your iPhone, and the original video resolution is preserved.").foregroundStyle(.secondary).lineSpacing(4)
+                        Text("Upscaling improves presentation and output resolution, but it cannot recreate detail that was never present in a low-resolution source.")
+                            .foregroundStyle(.secondary).lineSpacing(4)
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 28)
                 }
                 .padding(.horizontal, 20).padding(.vertical, 24)
@@ -112,6 +128,17 @@ struct ContentView: View {
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
             Task { if let movie = try? await item.loadTransferable(type: MovieTransferable.self) { await model.setInput(url: movie.url) } }
+        }
+    }
+
+    private var qualityDescription: String {
+        switch model.quality {
+        case .enhanced:
+            return "Keep the source dimensions, reduce compression noise, recover edge detail, and export at a higher bitrate."
+        case .twoK:
+            return "Upscale toward a 2560-pixel long edge, then enhance and export at a higher bitrate."
+        case .fourK:
+            return "Upscale toward a 3840-pixel long edge, enhance detail, and use the highest bitrate. Best quality, slowest export."
         }
     }
 }
