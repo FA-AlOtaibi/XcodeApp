@@ -10,6 +10,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Bundle PiperSR AI model
+        run: |
+          rm -rf /tmp/PiperSR
+          git clone --depth 1 https://github.com/ModelPiper/PiperSR.git /tmp/PiperSR
+          rm -rf FPSConverterApp/FPSConverter/PiperSR_2x.mlpackage
+          cp -R /tmp/PiperSR/PiperSR_2x.mlpackage FPSConverterApp/FPSConverter/
       - name: Generate project
         working-directory: FPSConverterApp
         run: xcodegen generate
