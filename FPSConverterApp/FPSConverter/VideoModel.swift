@@ -11,6 +11,13 @@ final class VideoModel: ObservableObject {
         var id: String { rawValue }
     }
 
+    enum Quality: String, CaseIterable, Identifiable {
+        case enhanced = "Enhanced"
+        case twoK = "2K"
+        case fourK = "4K"
+        var id: String { rawValue }
+    }
+
     struct Info {
         let url: URL
         let name: String
@@ -33,6 +40,7 @@ final class VideoModel: ObservableObject {
     @Published var output: Info?
     @Published var targetFPS: Int = 60
     @Published var mode: Mode = .smooth
+    @Published var quality: Quality = .twoK
     @Published var isProcessing = false
     @Published var stageText = ""
     @Published var errorText: String?
@@ -68,28 +76,69 @@ final class VideoModel: ObservableObject {
         if input == nil { errorText = "Could not read this video." }
     }
 
+    private func even(_ value: Int) -> Int { max(2, value / 2 * 2) }
+
+    private func outputSize(for input: Info) -> (Int, Int) {
+        let longEdgeTarget: Int
+        switch quality {
+        case .enhanced:
+            return (even(input.width), even(input.height))
+        case .twoK:
+            longEdgeTarget = 2560
+        case .fourK:
+            longEdgeTarget = 3840
+        }
+
+        let currentLong = max(input.width, input.height)
+        if currentLong >= longEdgeTarget {
+            return (even(input.width), even(input.height))
+        }
+
+        let ratio = Double(longEdgeTarget) / Double(max(1, currentLong))
+        return (even(Int(Double(input.width) * ratio)), even(Int(Double(input.height) * ratio)))
+    }
+
     func convert() async {
         guard let input else { return }
         isProcessing = true
         output = nil
         errorText = nil
-        stageText = mode == .smooth ? "Analyzing motion and creating in-between frames…" : "Converting frame rate…"
+        stageText = mode == .smooth ? "Analyzing motion and enhancing video…" : "Enhancing video and converting frame rate…"
         defer { isProcessing = false }
 
         let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FPS_\(targetFPS)_\(UUID().uuidString).mp4")
+            .appendingPathComponent("FPS_\(targetFPS)_\(quality.rawValue)_\(UUID().uuidString).mp4")
         try? FileManager.default.removeItem(at: out)
 
-        let videoFilter: String
-        switch mode {
-        case .simple:
-            videoFilter = "fps=\(targetFPS)"
-        case .smooth:
-            videoFilter = "minterpolate=fps=\(targetFPS):mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+        let (outW, outH) = outputSize(for: input)
+
+        var filters: [String] = []
+        if mode == .simple {
+            filters.append("fps=\(targetFPS)")
+        } else {
+            filters.append("minterpolate=fps=\(targetFPS):mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1")
         }
 
-        let pixelCount = max(1, input.width * input.height)
-        let baseMbps = max(8.0, min(45.0, Double(pixelCount) / 2_073_600.0 * (targetFPS >= 60 ? 20.0 : 14.0)))
+        // Mild denoise keeps compression artifacts from being magnified by upscaling.
+        filters.append("hqdn3d=1.1:1.1:5:5")
+
+        if outW != input.width || outH != input.height {
+            filters.append("scale=\(outW):\(outH):flags=lanczos")
+        }
+
+        // Conservative detail recovery; avoids the harsh halo look of aggressive sharpening.
+        filters.append("unsharp=5:5:0.55:5:5:0.0")
+        let videoFilter = filters.joined(separator: ",")
+
+        let outputPixels = max(1, outW * outH)
+        let fpsFactor = max(1.0, Double(targetFPS) / 30.0)
+        let mbpsPer1080p30: Double
+        switch quality {
+        case .enhanced: mbpsPer1080p30 = 16.0
+        case .twoK: mbpsPer1080p30 = 20.0
+        case .fourK: mbpsPer1080p30 = 24.0
+        }
+        let baseMbps = max(12.0, min(95.0, Double(outputPixels) / 2_073_600.0 * mbpsPer1080p30 * sqrt(fpsFactor)))
         let bitrate = "\(Int(baseMbps * 1_000_000))"
 
         let args = [
@@ -99,23 +148,21 @@ final class VideoModel: ObservableObject {
             "-b:v", bitrate,
             "-maxrate", bitrate,
             "-bufsize", "\(Int(baseMbps * 2_000_000))",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c:a", "aac", "-b:a", "256k",
             "-movflags", "+faststart",
             out.path
         ]
 
-        stageText = mode == .smooth ? "Smooth conversion in progress…" : "Fast conversion in progress…"
+        stageText = "Creating \(targetFPS) FPS · \(quality.rawValue) output…"
         let code: Int = await Task.detached(priority: .userInitiated) { () -> Int in
             FFmpegSupport.ffmpeg(args)
         }.value
 
         guard code == 0, FileManager.default.fileExists(atPath: out.path) else {
-            errorText = mode == .smooth
-                ? "Smooth conversion failed on this clip. Try Simple mode or a shorter video."
-                : "Conversion failed for this video."
+            errorText = "Conversion failed. 4K + 120 FPS is extremely demanding; try 4K/60 or 2K/120 for this clip."
             return
         }
-        stageText = "Finishing MP4…"
+        stageText = "Finishing high-quality MP4…"
         output = await inspect(url: out)
     }
 
