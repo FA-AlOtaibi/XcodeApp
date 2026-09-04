@@ -17,62 +17,70 @@ final class NativeVideoProcessor {
         }
     }
 
-    private let context = CIContext(options: [.cacheIntermediates: false, .priorityRequestLow: false])
+    private let context = CIContext(options: [
+        .cacheIntermediates: false,
+        .priorityRequestLow: false,
+        .useSoftwareRenderer: false
+    ])
 
     func process(sourceURL: URL,
+                 audioSourceURL: URL? = nil,
                  targetFPS: Int,
                  quality: OutputQuality,
                  mode: MotionMode,
+                 referenceDisplaySize: CGSize? = nil,
+                 aiSource: Bool = false,
                  progress: @escaping @Sendable (Double, String) -> Void) async throws -> URL {
         let asset = AVURLAsset(url: sourceURL)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw ProcessorError.noVideo }
         let natural = try await track.load(.naturalSize)
         let transform = try await track.load(.preferredTransform)
         let oriented = natural.applying(transform)
-        let displaySize = CGSize(width: abs(oriented.width), height: abs(oriented.height))
-        let targetSize = outputSize(from: displaySize, quality: quality)
+        let decodedDisplaySize = CGSize(width: abs(oriented.width), height: abs(oriented.height))
+        let sizingReference = referenceDisplaySize ?? decodedDisplaySize
+        let targetSize = outputSize(from: sizingReference, quality: quality)
 
         let temp = FileManager.default.temporaryDirectory
-        let videoOnly = temp.appendingPathComponent("native_video_\(UUID().uuidString).mp4")
+        let videoOnly = temp.appendingPathComponent("screenflow_video_\(UUID().uuidString).mp4")
         let finalURL = temp.appendingPathComponent("ScreenFlow_\(UUID().uuidString).mp4")
         try? FileManager.default.removeItem(at: videoOnly)
         try? FileManager.default.removeItem(at: finalURL)
 
-        progress(0.02, "Preparing video")
+        progress(0.02, aiSource ? "Preserving AI detail" : "Preparing high-quality render")
         var lastError: Error?
-        let codecs = codecPreference(for: quality, fps: targetFPS)
-        let bitrateScales: [Double] = [1.0, 0.78, 0.60]
-
-        outer: for codec in codecs {
-            for scale in bitrateScales {
+        for codec in codecPreference(for: quality, fps: targetFPS) {
+            for bitrateScale in [1.0, 0.82, 0.66] {
                 do {
                     try await encodeVideo(asset: asset,
                                           track: track,
                                           transform: transform,
                                           targetSize: targetSize,
                                           targetFPS: targetFPS,
-                                          mode: mode,
                                           codec: codec,
-                                          bitrateScale: scale,
+                                          bitrateScale: bitrateScale,
                                           outputURL: videoOnly,
+                                          aiSource: aiSource,
                                           progress: progress)
                     lastError = nil
-                    break outer
+                    break
                 } catch {
                     lastError = error
                     try? FileManager.default.removeItem(at: videoOnly)
                 }
             }
+            if lastError == nil { break }
         }
         if let lastError { throw lastError }
 
-        progress(0.94, "Restoring audio")
+        progress(0.95, "Restoring original audio")
+        let audioAsset = AVURLAsset(url: audioSourceURL ?? sourceURL)
         do {
-            try await attachAudio(processedVideo: videoOnly, original: asset, outputURL: finalURL)
+            try await attachAudio(processedVideo: videoOnly, original: audioAsset, outputURL: finalURL)
             try? FileManager.default.removeItem(at: videoOnly)
             progress(1, "Done")
             return finalURL
         } catch {
+            // A video-only result is still valid if the source had an unsupported audio format.
             try? FileManager.default.removeItem(at: finalURL)
             try FileManager.default.moveItem(at: videoOnly, to: finalURL)
             progress(1, "Done")
@@ -81,7 +89,7 @@ final class NativeVideoProcessor {
     }
 
     private func codecPreference(for quality: OutputQuality, fps: Int) -> [AVVideoCodecType] {
-        if quality == .fourK || fps >= 120 { return [.hevc, .h264] }
+        if quality == .fourK || fps >= 60 { return [.hevc, .h264] }
         return [.h264, .hevc]
     }
 
@@ -106,10 +114,10 @@ final class NativeVideoProcessor {
                              transform: CGAffineTransform,
                              targetSize: CGSize,
                              targetFPS: Int,
-                             mode: MotionMode,
                              codec: AVVideoCodecType,
                              bitrateScale: Double,
                              outputURL: URL,
+                             aiSource: Bool,
                              progress: @escaping @Sendable (Double, String) -> Void) async throws {
         let duration = try await asset.load(.duration)
         let seconds = max(0.001, CMTimeGetSeconds(duration))
@@ -130,9 +138,7 @@ final class NativeVideoProcessor {
             AVVideoMaxKeyFrameIntervalKey: max(targetFPS * 2, 60),
             AVVideoAllowFrameReorderingKey: true
         ]
-        if codec == .h264 {
-            compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
-        }
+        if codec == .h264 { compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel }
 
         let settings: [String: Any] = [
             AVVideoCodecKey: codec,
@@ -142,6 +148,8 @@ final class NativeVideoProcessor {
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
+        input.mediaTimeScale = 60_000
+
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: Int(targetSize.width),
@@ -154,68 +162,67 @@ final class NativeVideoProcessor {
         guard reader.startReading(), writer.startWriting() else { throw writer.error ?? ProcessorError.writer }
         writer.startSession(atSourceTime: .zero)
 
-        guard let first = readerOutput.copyNextSampleBuffer() else { throw ProcessorError.reader }
-        var previous = first
+        guard var previous = readerOutput.copyNextSampleBuffer() else { throw ProcessorError.reader }
         var current = readerOutput.copyNextSampleBuffer()
-        var nextOutputSeconds = 0.0
-        let step = 1.0 / Double(max(1, targetFPS))
+        var nextOutputIndex: Int64 = 0
+        let fps = Int32(max(1, targetFPS))
 
         while let next = current {
             guard let prevBuffer = CMSampleBufferGetImageBuffer(previous),
                   let nextBuffer = CMSampleBufferGetImageBuffer(next) else { throw ProcessorError.reader }
             let prevTime = max(0, CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(previous)))
-            let nextTime = max(prevTime + 0.0001, CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(next)))
+            let nextTime = max(prevTime + 0.000_001, CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(next)))
 
-            while nextOutputSeconds <= nextTime + 0.00001 {
+            while Double(nextOutputIndex) / Double(fps) <= nextTime + 0.000_001 {
                 while !input.isReadyForMoreMediaData {
-                    try await Task.sleep(nanoseconds: 1_000_000)
+                    try await Task.sleep(nanoseconds: 750_000)
                     if writer.status == .failed { throw writer.error ?? ProcessorError.writer }
                 }
-                let alpha = min(1, max(0, (nextOutputSeconds - prevTime) / max(0.0001, nextTime - prevTime)))
-                let image: CIImage
-                if mode == .smooth && alpha > 0 && alpha < 1 {
-                    image = blendedImage(a: prevBuffer, b: nextBuffer, alpha: alpha, transform: transform)
-                } else {
-                    image = orientedImage(from: alpha < 0.5 ? prevBuffer : nextBuffer, transform: transform)
-                }
+
+                let outputSeconds = Double(nextOutputIndex) / Double(fps)
+                let usePrevious = abs(outputSeconds - prevTime) <= abs(nextTime - outputSeconds)
+                let source = usePrevious ? prevBuffer : nextBuffer
+                let image = orientedImage(from: source, transform: transform)
+
                 guard let pool = adaptor.pixelBufferPool else { throw ProcessorError.writer }
                 var out: CVPixelBuffer?
                 CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
                 guard let pixel = out else { throw ProcessorError.writer }
-                let processed = enhancedAndScaled(image, targetSize: targetSize)
+
+                let processed = enhancedAndScaled(image, targetSize: targetSize, aiSource: aiSource)
                 context.render(processed,
                                to: pixel,
                                bounds: CGRect(origin: .zero, size: targetSize),
                                colorSpace: CGColorSpaceCreateDeviceRGB())
-                let pts = CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)
+                let pts = CMTime(value: nextOutputIndex, timescale: fps)
                 guard adaptor.append(pixel, withPresentationTime: pts) else { throw writer.error ?? ProcessorError.writer }
-                nextOutputSeconds += step
-                progress(min(0.91, 0.05 + (nextOutputSeconds / seconds) * 0.86),
-                         mode == .smooth ? "Synthesizing smooth motion" : "Converting frame rate")
+                nextOutputIndex += 1
+                progress(min(0.92, 0.05 + (outputSeconds / seconds) * 0.87),
+                         aiSource ? "Encoding AI-enhanced frames" : "Enhancing and encoding frames")
             }
             previous = next
             current = readerOutput.copyNextSampleBuffer()
         }
 
-        if let lastBuffer = CMSampleBufferGetImageBuffer(previous) {
-            while nextOutputSeconds < seconds {
+        if let last = CMSampleBufferGetImageBuffer(previous) {
+            while Double(nextOutputIndex) / Double(fps) < seconds - 0.000_001 {
                 while !input.isReadyForMoreMediaData {
-                    try await Task.sleep(nanoseconds: 1_000_000)
+                    try await Task.sleep(nanoseconds: 750_000)
                     if writer.status == .failed { throw writer.error ?? ProcessorError.writer }
                 }
                 guard let pool = adaptor.pixelBufferPool else { throw ProcessorError.writer }
                 var out: CVPixelBuffer?
                 CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
                 guard let pixel = out else { throw ProcessorError.writer }
-                let processed = enhancedAndScaled(orientedImage(from: lastBuffer, transform: transform), targetSize: targetSize)
+                let processed = enhancedAndScaled(orientedImage(from: last, transform: transform), targetSize: targetSize, aiSource: aiSource)
                 context.render(processed,
                                to: pixel,
                                bounds: CGRect(origin: .zero, size: targetSize),
                                colorSpace: CGColorSpaceCreateDeviceRGB())
-                guard adaptor.append(pixel, withPresentationTime: CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)) else {
+                guard adaptor.append(pixel, withPresentationTime: CMTime(value: nextOutputIndex, timescale: fps)) else {
                     throw writer.error ?? ProcessorError.writer
                 }
-                nextOutputSeconds += step
+                nextOutputIndex += 1
             }
         }
 
@@ -225,37 +232,27 @@ final class NativeVideoProcessor {
     }
 
     private func bitrateFor(size: CGSize, fps: Int, codec: AVVideoCodecType) -> Int {
-        let pixels = max(1, size.width * size.height)
-        let ratio = pixels / (1920 * 1080)
-        let fpsRatio = max(1, Double(fps) / 30.0)
-        var mbps = 20.0 * ratio * sqrt(fpsRatio)
+        let pixelRatio = max(1, size.width * size.height) / CGFloat(1920 * 1080)
+        let fpsRatio = max(1.0, Double(fps) / 30.0)
+        var mbps = 28.0 * Double(pixelRatio) * sqrt(fpsRatio)
         if codec == .hevc { mbps *= 0.76 }
-        mbps = min(180, max(14, mbps))
+        mbps = min(220, max(20, mbps))
         return Int(mbps * 1_000_000)
     }
 
     private func orientedImage(from buffer: CVPixelBuffer, transform: CGAffineTransform) -> CIImage {
         let transformed = CIImage(cvPixelBuffer: buffer).transformed(by: transform)
-        let e = transformed.extent
-        return transformed.transformed(by: CGAffineTransform(translationX: -e.origin.x, y: -e.origin.y))
+        let extent = transformed.extent
+        return transformed.transformed(by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
     }
 
-    private func blendedImage(a: CVPixelBuffer, b: CVPixelBuffer, alpha: Double, transform: CGAffineTransform) -> CIImage {
-        let background = orientedImage(from: a, transform: transform)
-        let foreground = orientedImage(from: b, transform: transform)
-        let faded = foreground.applyingFilter("CIColorMatrix", parameters: [
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(alpha))
-        ])
-        return faded.composited(over: background)
-    }
-
-    private func enhancedAndScaled(_ image: CIImage, targetSize: CGSize) -> CIImage {
+    private func enhancedAndScaled(_ image: CIImage, targetSize: CGSize, aiSource: Bool) -> CIImage {
         var result = image
 
-        if let noise = CIFilter(name: "CINoiseReduction") {
+        if !aiSource, let noise = CIFilter(name: "CINoiseReduction") {
             noise.setValue(result, forKey: kCIInputImageKey)
-            noise.setValue(0.01, forKey: "inputNoiseLevel")
-            noise.setValue(0.18, forKey: "inputSharpness")
+            noise.setValue(0.006, forKey: "inputNoiseLevel")
+            noise.setValue(0.28, forKey: "inputSharpness")
             result = noise.outputImage ?? result
         }
 
@@ -267,21 +264,28 @@ final class NativeVideoProcessor {
             result = lanczos.outputImage ?? result
         }
 
-        if let unsharp = CIFilter(name: "CIUnsharpMask") {
-            unsharp.setValue(result, forKey: kCIInputImageKey)
-            unsharp.setValue(0.72, forKey: kCIInputIntensityKey)
-            unsharp.setValue(1.15, forKey: kCIInputRadiusKey)
-            result = unsharp.outputImage ?? result
+        if aiSource {
+            if let sharpen = CIFilter(name: "CISharpenLuminance") {
+                sharpen.setValue(result, forKey: kCIInputImageKey)
+                sharpen.setValue(0.10, forKey: kCIInputSharpnessKey)
+                result = sharpen.outputImage ?? result
+            }
+        } else {
+            if let unsharp = CIFilter(name: "CIUnsharpMask") {
+                unsharp.setValue(result, forKey: kCIInputImageKey)
+                unsharp.setValue(0.42, forKey: kCIInputIntensityKey)
+                unsharp.setValue(0.90, forKey: kCIInputRadiusKey)
+                result = unsharp.outputImage ?? result
+            }
+            if let sharpen = CIFilter(name: "CISharpenLuminance") {
+                sharpen.setValue(result, forKey: kCIInputImageKey)
+                sharpen.setValue(0.18, forKey: kCIInputSharpnessKey)
+                result = sharpen.outputImage ?? result
+            }
         }
 
-        if let sharpen = CIFilter(name: "CISharpenLuminance") {
-            sharpen.setValue(result, forKey: kCIInputImageKey)
-            sharpen.setValue(0.32, forKey: kCIInputSharpnessKey)
-            result = sharpen.outputImage ?? result
-        }
-
-        let e = result.extent
-        return result.transformed(by: CGAffineTransform(translationX: -e.origin.x, y: -e.origin.y))
+        let extent = result.extent
+        return result.transformed(by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
     }
 
     private func attachAudio(processedVideo: URL, original: AVAsset, outputURL: URL) async throws {
