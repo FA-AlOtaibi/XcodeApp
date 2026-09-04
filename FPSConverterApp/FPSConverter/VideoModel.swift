@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import Photos
 
@@ -67,7 +68,8 @@ final class VideoModel: ObservableObject {
             let fps = Double(try await track.load(.nominalFrameRate))
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-            return Info(url: url, name: url.lastPathComponent,
+            return Info(url: url,
+                        name: url.lastPathComponent,
                         duration: duration.isFinite ? duration : 0,
                         fps: fps,
                         width: max(2, Int(abs(oriented.width))),
@@ -94,61 +96,100 @@ final class VideoModel: ObservableObject {
         errorText = nil
         noticeText = nil
         progress = 0.01
-        defer { isProcessing = false }
 
-        var sourceForNative = input.url
-        var aiTemporary: URL?
+        var motionTemp: URL?
+        var aiTemp: URL?
+        defer {
+            isProcessing = false
+            if let motionTemp { try? FileManager.default.removeItem(at: motionTemp) }
+            if let aiTemp { try? FileManager.default.removeItem(at: aiTemp) }
+        }
+
+        var workingURL = input.url
         var aiApplied = false
+        var completedBase = 0.0
+
+        // Smooth mode now uses true motion-compensated interpolation instead of cross-fading frames.
+        if mode == .smooth, input.fps > 0, Double(targetFPS) > input.fps + 0.5 {
+            stageText = "Motion-compensated interpolation"
+            do {
+                let interpolator = MotionInterpolator()
+                let generated = try await interpolator.interpolate(sourceURL: input.url, targetFPS: targetFPS) { p in
+                    Task { @MainActor in self.progress = min(0.28, 0.02 + p * 0.26) }
+                }
+                workingURL = generated
+                motionTemp = generated
+                completedBase = 0.28
+            } catch {
+                noticeText = "The advanced motion engine was unavailable for this clip, so ScreenFlow kept exact frame timing without frame blending."
+                completedBase = 0.04
+            }
+        }
 
         if upscaleEngine == .ai {
-            stageText = "AI detail recovery"
+            stageText = "Real-ESRGAN detail recovery"
             do {
                 let sr = AISuperResolution()
-                let generated = try await sr.process(sourceURL: input.url) { p in
-                    Task { @MainActor in self.progress = min(0.32, p * 0.32) }
+                let start = completedBase
+                let span = start >= 0.25 ? 0.42 : 0.58
+                let generated = try await sr.process(sourceURL: workingURL) { p in
+                    Task { @MainActor in self.progress = min(0.74, start + p * span) }
                 }
-                sourceForNative = generated
-                aiTemporary = generated
+                workingURL = generated
+                aiTemp = generated
                 aiApplied = true
+                completedBase = max(completedBase + span, 0.62)
             } catch {
-                noticeText = "AI detail recovery was not available for this clip, so ScreenFlow switched to the native enhancer automatically."
-                progress = 0.03
+                let previous = noticeText.map { $0 + " " } ?? ""
+                noticeText = previous + "Real-ESRGAN could not run on this clip, so the high-quality native enhancer was used automatically."
+                completedBase = max(completedBase, 0.08)
             }
         }
 
         do {
-            let result = try await render(sourceURL: sourceForNative, quality: nativeQuality, baseProgress: aiApplied ? 0.32 : 0.0)
-            if let aiTemporary { try? FileManager.default.removeItem(at: aiTemporary) }
+            let result = try await render(sourceURL: workingURL,
+                                          original: input,
+                                          aiApplied: aiApplied,
+                                          baseProgress: completedBase)
             try await finish(result: result, library: library)
         } catch {
-            // One automatic recovery pass: use the original source and the stable native renderer.
-            if let aiTemporary { try? FileManager.default.removeItem(at: aiTemporary) }
-            noticeText = "The first render path was not supported by this clip, so ScreenFlow retried it with the compatibility renderer."
-            progress = 0.04
+            // Final compatibility retry: original source, stable native renderer, exact cadence.
+            let previous = noticeText.map { $0 + " " } ?? ""
+            noticeText = previous + "ScreenFlow retried the final render with the compatibility path."
+            progress = 0.06
             stageText = "Compatibility render"
             do {
-                let fallback = try await render(sourceURL: input.url, quality: nativeQuality, baseProgress: 0.0, forceFast: true)
+                let fallback = try await render(sourceURL: input.url,
+                                                original: input,
+                                                aiApplied: false,
+                                                baseProgress: 0,
+                                                forceCompatibility: true)
                 try await finish(result: fallback, library: library)
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                errorText = message.isEmpty ? "This clip could not be encoded on this device." : message
+                errorText = message.isEmpty ? "This clip could not be encoded on this iPhone." : message
             }
         }
     }
 
     private func render(sourceURL: URL,
-                        quality: NativeVideoProcessor.OutputQuality,
+                        original: Info,
+                        aiApplied: Bool,
                         baseProgress: Double,
-                        forceFast: Bool = false) async throws -> URL {
+                        forceCompatibility: Bool = false) async throws -> URL {
         let processor = NativeVideoProcessor()
+        let base = min(0.78, baseProgress)
         return try await processor.process(
             sourceURL: sourceURL,
+            audioSourceURL: original.url,
             targetFPS: targetFPS,
-            quality: quality,
-            mode: forceFast ? .fast : (mode == .smooth ? .smooth : .fast)
+            quality: nativeQuality,
+            mode: .fast,
+            referenceDisplaySize: CGSize(width: original.width, height: original.height),
+            aiSource: aiApplied && !forceCompatibility
         ) { p, stage in
             Task { @MainActor in
-                self.progress = min(0.98, baseProgress + p * (1.0 - baseProgress))
+                self.progress = min(0.98, base + p * (1.0 - base))
                 self.stageText = stage
             }
         }
