@@ -8,6 +8,7 @@ final class HuggingFaceService: ObservableObject {
     @Published var depthImage: UIImage?
     @Published var angleImages: [UIImage] = []
     @Published var modelURL: URL?
+    @Published var usdzURL: URL?
     @Published var errorMessage: String?
 
     @Published var qwenHost = "https://multimodalart-qwen-image-edit-angles-2.hf.space"
@@ -23,6 +24,7 @@ final class HuggingFaceService: ObservableObject {
         depthImage = nil
         angleImages = []
         modelURL = nil
+        usdzURL = nil
         errorMessage = nil
     }
 
@@ -91,7 +93,7 @@ final class HuggingFaceService: ObservableObject {
 
     func generate3D(from image: UIImage, textured: Bool = true) async {
         guard !token.isEmpty else { errorMessage = "أضف Hugging Face Token من الإعدادات أولاً."; return }
-        isBusy = true; modelURL = nil; errorMessage = nil
+        isBusy = true; modelURL = nil; usdzURL = nil; errorMessage = nil
         defer { isBusy = false; progressText = "" }
         do {
             let client = try GradioClient(baseURL: hunyuanHost, token: token)
@@ -99,35 +101,67 @@ final class HuggingFaceService: ObservableObject {
             let file = try await client.upload(image: image)
             progressText = textured ? "نبني المجسم والخامات…" : "نبني المجسم…"
             let endpoint = textured ? "generation_all" : "shape_generation"
-            let params: [String: GradioValue] = [
-                "caption": .null,
-                "image": .file(file),
-                "mv_image_front": .null,
-                "mv_image_back": .null,
-                "mv_image_left": .null,
-                "mv_image_right": .null,
-                "steps": .number(30),
-                "guidance_scale": .number(5.0),
-                "seed": .number(Double(Int.random(in: 1...2_000_000_000))),
-                "octree_resolution": .number(256),
-                "check_box_rembg": .bool(false),
-                "num_chunks": .number(200000),
-                "randomize_seed": .bool(true)
-            ]
-            let output = try await client.call(endpoint: endpoint, parameters: params, timeout: 1200)
+            let output = try await client.call(endpoint: endpoint, parameters: hunyuanParameters(file: file), timeout: 1200)
 
             let remote: URL?
             if textured, let array = output as? [Any], array.count > 1 {
-                remote = GradioClient.firstURL(in: array[1], preferredExtensions: ["glb","obj"])
-                    ?? GradioClient.firstURL(in: output, preferredExtensions: ["glb","obj"])
+                remote = GradioClient.firstURL(in: array[1], preferredExtensions: ["obj","usdz","usd","usdc","glb"])
+                    ?? GradioClient.firstURL(in: output, preferredExtensions: ["obj","usdz","usd","usdc","glb"])
             } else {
-                remote = GradioClient.firstURL(in: output, preferredExtensions: ["glb","obj"])
+                remote = GradioClient.firstURL(in: output, preferredExtensions: ["obj","usdz","usd","usdc","glb"])
             }
             guard let remote else {
-                throw NSError(domain: "HF", code: -3, userInfo: [NSLocalizedDescriptionKey: "اكتمل Hunyuan3D لكن لم أجد رابط ملف GLB/OBJ في النتيجة."])
+                throw NSError(domain: "HF", code: -3, userInfo: [NSLocalizedDescriptionKey: "اكتمل Hunyuan3D لكن لم أجد ملف 3D قابلًا للتحميل."])
             }
             progressText = "ننزل ملف 3D…"
-            modelURL = try await client.download(remote)
+            let local = try await client.download(remote)
+            modelURL = local
+            if ["obj", "usd", "usda", "usdc", "usdz"].contains(local.pathExtension.lowercased()) {
+                progressText = "نجهز USDZ للـ AR…"
+                usdzURL = try? USDZConverter.convertToUSDZ(local)
+            }
         } catch { errorMessage = "3D: \(error.localizedDescription)" }
+    }
+
+    func generateARUSDZ(from image: UIImage) async {
+        guard !token.isEmpty else { errorMessage = "أضف Hugging Face Token من الإعدادات أولاً."; return }
+        isBusy = true; usdzURL = nil; errorMessage = nil
+        defer { isBusy = false; progressText = "" }
+        do {
+            let client = try GradioClient(baseURL: hunyuanHost, token: token)
+            progressText = "ننشئ نسخة AR من المجسم…"
+            let file = try await client.upload(image: image)
+            let output = try await client.call(endpoint: "shape_generation", parameters: hunyuanParameters(file: file), timeout: 1200)
+            guard let remote = GradioClient.firstURL(in: output, preferredExtensions: ["usdz","usd","usdc","obj","glb"]) else {
+                throw NSError(domain: "HF", code: -4, userInfo: [NSLocalizedDescriptionKey: "خدمة Hunyuan3D لم تُرجع ملفًا مناسبًا للـ AR."])
+            }
+            progressText = "ننزل المجسم…"
+            let local = try await client.download(remote)
+            modelURL = local
+            let ext = local.pathExtension.lowercased()
+            guard ["obj", "usd", "usda", "usdc", "usdz"].contains(ext) else {
+                throw NSError(domain: "HF", code: -5, userInfo: [NSLocalizedDescriptionKey: "رجعت الخدمة ملف \(ext.uppercased()) فقط. AR Quick Look يحتاج USDZ؛ جرّب زر AR مرة أخرى لأن المخرجات قد تختلف حسب الـ Space."])
+            }
+            progressText = "نحوّل إلى USDZ…"
+            usdzURL = try USDZConverter.convertToUSDZ(local)
+        } catch { errorMessage = "AR: \(error.localizedDescription)" }
+    }
+
+    private func hunyuanParameters(file: GradioFile) -> [String: GradioValue] {
+        [
+            "caption": .null,
+            "image": .file(file),
+            "mv_image_front": .null,
+            "mv_image_back": .null,
+            "mv_image_left": .null,
+            "mv_image_right": .null,
+            "steps": .number(30),
+            "guidance_scale": .number(5.0),
+            "seed": .number(Double(Int.random(in: 1...2_000_000_000))),
+            "octree_resolution": .number(256),
+            "check_box_rembg": .bool(false),
+            "num_chunks": .number(200000),
+            "randomize_seed": .bool(true)
+        ]
     }
 }
