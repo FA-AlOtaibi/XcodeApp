@@ -32,10 +32,13 @@ final class VideoModel: ObservableObject {
         let width: Int
         let height: Int
         let bytes: Int64
-        var durationText: String { let s = Int(duration.rounded()); return String(format: "%d:%02d", s / 60, s % 60) }
+        var durationText: String {
+            let s = max(0, Int(duration.rounded()))
+            return String(format: "%d:%02d", s / 60, s % 60)
+        }
         var sizeText: String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
         var resolutionText: String { "\(width)×\(height)" }
-        var fpsText: String { fps > 0 ? String(format: "%.2f FPS", fps) : "Unknown FPS" }
+        var fpsText: String { fps > 0 ? String(format: "%.1f FPS", fps) : "Unknown FPS" }
     }
 
     @Published var input: Info?
@@ -49,6 +52,8 @@ final class VideoModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var errorText: String?
     @Published var showSaved = false
+    @Published var noticeText: String?
+    @Published var savedLibraryItem: LibraryStore.Item?
 
     let fpsOptions = [24, 30, 60, 120]
 
@@ -63,95 +68,171 @@ final class VideoModel: ObservableObject {
             let fps = Double(try await track.load(.nominalFrameRate))
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-            return Info(url: url, name: url.lastPathComponent, duration: duration.isFinite ? duration : 0,
-                        fps: fps, width: Int(abs(oriented.width)), height: Int(abs(oriented.height)), bytes: bytes)
+            return Info(url: url, name: url.lastPathComponent,
+                        duration: duration.isFinite ? duration : 0,
+                        fps: fps, width: max(2, Int(abs(oriented.width))),
+                        height: max(2, Int(abs(oriented.height))), bytes: bytes)
         } catch { return nil }
     }
 
     func setInput(url: URL) async {
-        errorText = nil; output = nil; progress = 0
+        errorText = nil
+        noticeText = nil
+        output = nil
+        savedLibraryItem = nil
+        progress = 0
         input = await inspect(url: url)
-        if input == nil { errorText = "Could not read this video." }
+        if input == nil { errorText = "This video could not be opened. Try exporting it as MP4 or MOV first." }
     }
 
     private func even(_ v: Int) -> Int { max(2, v / 2 * 2) }
 
-    private func outputSize(for input: Info) -> (Int, Int) {
-        let target: Int
+    private func outputSize(for source: Info) -> (Int, Int) {
+        let targetLong: Int
         switch quality {
-        case .enhanced: return (even(input.width), even(input.height))
-        case .twoK: target = 2560
-        case .fourK: target = 3840
+        case .enhanced: return (even(source.width), even(source.height))
+        case .twoK: targetLong = 2560
+        case .fourK: targetLong = 3840
         }
-        let currentLong = max(input.width, input.height)
-        if currentLong >= target { return (even(input.width), even(input.height)) }
-        let ratio = Double(target) / Double(max(1, currentLong))
-        return (even(Int(Double(input.width) * ratio)), even(Int(Double(input.height) * ratio)))
+        let currentLong = max(source.width, source.height)
+        if currentLong >= targetLong { return (even(source.width), even(source.height)) }
+        let ratio = Double(targetLong) / Double(max(1, currentLong))
+        return (even(Int(Double(source.width) * ratio)), even(Int(Double(source.height) * ratio)))
     }
 
-    func convert() async {
+    func convert(library: LibraryStore) async {
         guard let input else { return }
-        isProcessing = true; output = nil; errorText = nil; progress = 0
+        isProcessing = true
+        output = nil
+        savedLibraryItem = nil
+        errorText = nil
+        noticeText = nil
+        progress = 0.02
         defer { isProcessing = false }
 
-        let finalURL = FileManager.default.temporaryDirectory.appendingPathComponent("FPS_Quality_\(UUID().uuidString).mp4")
-        try? FileManager.default.removeItem(at: finalURL)
-        var videoSource = input.url
-        var aiTemp: URL?
+        let temp = FileManager.default.temporaryDirectory
+        let motionURL = temp.appendingPathComponent("motion_\(UUID().uuidString).mp4")
+        let aiURLHolder = temp.appendingPathComponent("unused_\(UUID().uuidString).mov")
+        let finalURL = temp.appendingPathComponent("ScreenFlow_\(UUID().uuidString).mp4")
+        defer {
+            try? FileManager.default.removeItem(at: motionURL)
+            try? FileManager.default.removeItem(at: aiURLHolder)
+        }
 
-        if upscaleEngine == .ai {
-            stageText = "AI Super Resolution · Apple Neural Engine"
+        // Stage 1: create the requested frame rate while still at source resolution.
+        stageText = mode == .smooth ? "Creating smooth motion" : "Converting frame rate"
+        progress = 0.08
+        let motionFilter = mode == .smooth
+            ? "minterpolate=fps=\(targetFPS):mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+            : "fps=\(targetFPS)"
+
+        var motionArgs = ["ffmpeg", "-y", "-i", input.url.path,
+                          "-map", "0:v:0", "-an", "-vf", motionFilter,
+                          "-c:v", "h264_videotoolbox", "-b:v", "18000000",
+                          "-pix_fmt", "yuv420p", motionURL.path]
+        var motionCode = await runFFmpeg(motionArgs)
+
+        // Some clips/codecs are happier when the hardware encoder receives HEVC.
+        if motionCode != 0 {
+            motionArgs = ["ffmpeg", "-y", "-i", input.url.path,
+                          "-map", "0:v:0", "-an", "-vf", motionFilter,
+                          "-c:v", "hevc_videotoolbox", "-b:v", "18000000",
+                          "-pix_fmt", "yuv420p", motionURL.path]
+            motionCode = await runFFmpeg(motionArgs)
+        }
+        guard motionCode == 0, FileManager.default.fileExists(atPath: motionURL.path) else {
+            errorText = "Frame-rate conversion failed for this clip. Try Fast mode, or choose a lower FPS."
+            return
+        }
+        progress = 0.34
+
+        // Stage 2: AI SR is optional. If it cannot run on this device/clip, automatically fall back.
+        var visualSource = motionURL
+        var aiTemp: URL?
+        if upscaleEngine == .ai && quality != .enhanced {
+            stageText = "AI Super Resolution"
             do {
                 let sr = AISuperResolution()
-                let temp = try await sr.process(sourceURL: input.url) { p in
-                    Task { @MainActor in self.progress = p * 0.72 }
+                let generated = try await sr.process(sourceURL: motionURL) { p in
+                    Task { @MainActor in self.progress = 0.34 + p * 0.42 }
                 }
-                videoSource = temp
-                aiTemp = temp
+                visualSource = generated
+                aiTemp = generated
             } catch {
-                errorText = "AI Super Resolution could not process this clip. Try Standard mode for this video."
-                return
+                noticeText = "AI Super Resolution was not available for this clip, so ScreenFlow automatically used the high-quality scaler instead."
+                visualSource = motionURL
+                progress = 0.76
             }
+        } else {
+            progress = 0.76
         }
 
+        // Stage 3: final resolution + high quality hardware encode + original audio.
+        stageText = "Finishing \(targetFPS) FPS · \(quality.rawValue)"
         let (outW, outH) = outputSize(for: input)
         var filters: [String] = []
-        filters.append(mode == .smooth
-            ? "minterpolate=fps=\(targetFPS):mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"
-            : "fps=\(targetFPS)")
-
-        if upscaleEngine == .standard {
-            filters.append("hqdn3d=0.8:0.8:3:3")
+        if upscaleEngine == .standard || visualSource == motionURL {
+            filters.append("hqdn3d=0.55:0.55:2:2")
         }
         filters.append("scale=\(outW):\(outH):flags=lanczos")
-        if upscaleEngine == .standard { filters.append("unsharp=5:5:0.35:5:5:0") }
+        if upscaleEngine == .standard || visualSource == motionURL {
+            filters.append("unsharp=5:5:0.22:5:5:0")
+        }
         let vf = filters.joined(separator: ",")
 
-        let outputPixels = max(1, outW * outH)
+        let pixels = Double(max(1, outW * outH))
         let fpsFactor = max(1.0, Double(targetFPS) / 30.0)
-        let base = quality == .fourK ? 26.0 : (quality == .twoK ? 21.0 : 17.0)
-        let mbps = max(14.0, min(110.0, Double(outputPixels) / 2_073_600.0 * base * sqrt(fpsFactor)))
-        let bitrate = "\(Int(mbps * 1_000_000))"
+        let mbps = min(140.0, max(18.0, pixels / 2_073_600.0 * 20.0 * sqrt(fpsFactor)))
+        let bitrate = String(Int(mbps * 1_000_000))
+        let bufsize = String(Int(mbps * 2_000_000))
+        let preferHEVC = quality == .fourK || targetFPS >= 120
+        let firstCodec = preferHEVC ? "hevc_videotoolbox" : "h264_videotoolbox"
+        let secondCodec = preferHEVC ? "h264_videotoolbox" : "hevc_videotoolbox"
 
-        stageText = "Creating \(targetFPS) FPS · \(quality.rawValue)"
-        progress = max(progress, 0.74)
-        let args = [
-            "ffmpeg", "-y", "-i", videoSource.path, "-i", input.url.path,
-            "-map", "0:v:0", "-map", "1:a?", "-vf", vf,
-            "-c:v", "h264_videotoolbox", "-b:v", bitrate, "-maxrate", bitrate,
-            "-bufsize", "\(Int(mbps * 2_000_000))", "-c:a", "aac", "-b:a", "256k",
-            "-movflags", "+faststart", finalURL.path
-        ]
-
-        let code: Int = await Task.detached(priority: .userInitiated) { FFmpegSupport.ffmpeg(args) }.value
+        var finalCode = await encodeFinal(video: visualSource, original: input.url, output: finalURL,
+                                          vf: vf, codec: firstCodec, bitrate: bitrate, bufsize: bufsize)
+        if finalCode != 0 {
+            finalCode = await encodeFinal(video: visualSource, original: input.url, output: finalURL,
+                                          vf: vf, codec: secondCodec, bitrate: bitrate, bufsize: bufsize)
+        }
         if let aiTemp { try? FileManager.default.removeItem(at: aiTemp) }
-        guard code == 0, FileManager.default.fileExists(atPath: finalURL.path) else {
-            errorText = "Conversion failed. 4K + 120 FPS is very demanding; try 4K/60 or 2K/120."
+
+        guard finalCode == 0, FileManager.default.fileExists(atPath: finalURL.path),
+              let finalInfo = await inspect(url: finalURL) else {
+            errorText = "The final export could not be encoded on this iPhone. Try 4K/60, 2K/120, or Fast mode."
             return
+        }
+
+        progress = 0.96
+        stageText = "Saving to ScreenFlow Library"
+        do {
+            let saved = try library.add(sourceURL: finalURL, info: finalInfo)
+            savedLibraryItem = saved
+            let permanentURL = library.url(for: saved)
+            output = await inspect(url: permanentURL)
+            try? FileManager.default.removeItem(at: finalURL)
+        } catch {
+            output = finalInfo
+            noticeText = "Conversion finished, but the app could not copy it into the library. You can still share or save this result."
         }
         progress = 1
         stageText = "Done"
-        output = await inspect(url: finalURL)
+    }
+
+    private func runFFmpeg(_ args: [String]) async -> Int {
+        await Task.detached(priority: .userInitiated) { FFmpegSupport.ffmpeg(args) }.value
+    }
+
+    private func encodeFinal(video: URL, original: URL, output: URL, vf: String,
+                             codec: String, bitrate: String, bufsize: String) async -> Int {
+        try? FileManager.default.removeItem(at: output)
+        let args = ["ffmpeg", "-y", "-i", video.path, "-i", original.path,
+                    "-map", "0:v:0", "-map", "1:a?", "-vf", vf,
+                    "-c:v", codec, "-b:v", bitrate, "-maxrate", bitrate,
+                    "-bufsize", bufsize, "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-b:a", "256k", "-shortest",
+                    "-movflags", "+faststart", output.path]
+        return await runFFmpeg(args)
     }
 
     func saveToPhotos() {
@@ -160,7 +241,9 @@ final class VideoModel: ObservableObject {
             guard status == .authorized || status == .limited else { return }
             PHPhotoLibrary.shared().performChanges {
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-            } completionHandler: { success, _ in Task { @MainActor in self.showSaved = success } }
+            } completionHandler: { success, _ in
+                Task { @MainActor in self.showSaved = success }
+            }
         }
     }
 }
