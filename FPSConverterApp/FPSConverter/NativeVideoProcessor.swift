@@ -62,7 +62,6 @@ final class NativeVideoProcessor {
             progress(1, "Done")
             return finalURL
         } catch {
-            // A valid video result is still better than losing the entire conversion if the source audio track is unusual.
             try? FileManager.default.removeItem(at: finalURL)
             try FileManager.default.moveItem(at: videoOnly, to: finalURL)
             progress(1, "Done")
@@ -113,12 +112,14 @@ final class NativeVideoProcessor {
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         let bitrate = bitrateFor(size: targetSize, fps: targetFPS, codec: codec)
-        let compression: [String: Any] = [
+        var compression: [String: Any] = [
             AVVideoAverageBitRateKey: bitrate,
             AVVideoExpectedSourceFrameRateKey: targetFPS,
-            AVVideoMaxKeyFrameIntervalKey: max(targetFPS * 2, 60),
-            AVVideoProfileLevelKey: codec == .h264 ? AVVideoProfileLevelH264HighAutoLevel : kVTProfileLevel_HEVC_Main_AutoLevel as String
+            AVVideoMaxKeyFrameIntervalKey: max(targetFPS * 2, 60)
         ]
+        if codec == .h264 {
+            compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
+        }
         let settings: [String: Any] = [
             AVVideoCodecKey: codec,
             AVVideoWidthKey: Int(targetSize.width),
@@ -189,7 +190,7 @@ final class NativeVideoProcessor {
                 guard let pixel = out else { throw ProcessorError.writer }
                 let processed = enhancedAndScaled(orientedImage(from: lastBuffer, transform: transform), targetSize: targetSize)
                 context.render(processed, to: pixel, bounds: CGRect(origin: .zero, size: targetSize), colorSpace: CGColorSpaceCreateDeviceRGB())
-                guard adaptor.append(pixel, withPresentationTime: CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)) else { throw ProcessorError.writer }
+                guard adaptor.append(pixel, withPresentationTime: CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)) else { throw writer.error ?? ProcessorError.writer }
                 nextOutputSeconds += step
             }
         }
