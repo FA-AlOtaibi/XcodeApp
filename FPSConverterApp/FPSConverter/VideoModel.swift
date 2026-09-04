@@ -31,7 +31,6 @@ final class VideoModel: ObservableObject {
         let width: Int
         let height: Int
         let bytes: Int64
-
         var durationText: String {
             let s = max(0, Int(duration.rounded()))
             return String(format: "%d:%02d", s / 60, s % 60)
@@ -45,8 +44,8 @@ final class VideoModel: ObservableObject {
     @Published var output: Info?
     @Published var targetFPS = 60
     @Published var mode: Mode = .smooth
-    @Published var quality: Quality = .twoK
-    @Published var upscaleEngine: UpscaleEngine = .standard
+    @Published var quality: Quality = .fourK
+    @Published var upscaleEngine: UpscaleEngine = .ai
     @Published var isProcessing = false
     @Published var stageText = ""
     @Published var progress: Double = 0
@@ -68,16 +67,13 @@ final class VideoModel: ObservableObject {
             let fps = Double(try await track.load(.nominalFrameRate))
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             let bytes = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-            return Info(url: url,
-                        name: url.lastPathComponent,
+            return Info(url: url, name: url.lastPathComponent,
                         duration: duration.isFinite ? duration : 0,
                         fps: fps,
                         width: max(2, Int(abs(oriented.width))),
                         height: max(2, Int(abs(oriented.height))),
                         bytes: bytes)
-        } catch {
-            return nil
-        }
+        } catch { return nil }
     }
 
     func setInput(url: URL) async {
@@ -87,9 +83,7 @@ final class VideoModel: ObservableObject {
         savedLibraryItem = nil
         progress = 0
         input = await inspect(url: url)
-        if input == nil {
-            errorText = "This video could not be opened. Try MP4 or MOV."
-        }
+        if input == nil { errorText = "This video could not be opened. Try MP4 or MOV." }
     }
 
     func convert(library: LibraryStore) async {
@@ -104,66 +98,80 @@ final class VideoModel: ObservableObject {
 
         var sourceForNative = input.url
         var aiTemporary: URL?
+        var aiApplied = false
 
-        if upscaleEngine == .ai && quality != .enhanced {
-            stageText = "AI Super Resolution"
+        if upscaleEngine == .ai {
+            stageText = "AI detail recovery"
             do {
                 let sr = AISuperResolution()
                 let generated = try await sr.process(sourceURL: input.url) { p in
-                    Task { @MainActor in
-                        self.progress = min(0.28, p * 0.28)
-                    }
+                    Task { @MainActor in self.progress = min(0.32, p * 0.32) }
                 }
                 sourceForNative = generated
                 aiTemporary = generated
+                aiApplied = true
             } catch {
-                noticeText = "AI Super Resolution was unavailable for this clip, so ScreenFlow automatically continued with the native high-quality scaler."
-                sourceForNative = input.url
-                progress = 0.02
+                noticeText = "AI detail recovery was not available for this clip, so ScreenFlow switched to the native enhancer automatically."
+                progress = 0.03
             }
         }
 
-        let processor = NativeVideoProcessor()
         do {
-            let result = try await processor.process(
-                sourceURL: sourceForNative,
-                targetFPS: targetFPS,
-                quality: nativeQuality,
-                mode: mode == .smooth ? .smooth : .fast
-            ) { p, stage in
-                Task { @MainActor in
-                    let base = self.upscaleEngine == .ai && aiTemporary != nil ? 0.28 : 0.0
-                    self.progress = min(0.99, base + p * (1.0 - base))
-                    self.stageText = stage
-                }
-            }
+            let result = try await render(sourceURL: sourceForNative, quality: nativeQuality, baseProgress: aiApplied ? 0.32 : 0.0)
             if let aiTemporary { try? FileManager.default.removeItem(at: aiTemporary) }
-
-            guard let resultInfo = await inspect(url: result) else {
-                try? FileManager.default.removeItem(at: result)
-                errorText = "The conversion finished, but the output file could not be verified."
-                return
-            }
-
-            stageText = "Saving to Library"
-            progress = 0.99
-            do {
-                let item = try library.add(sourceURL: result, info: resultInfo)
-                savedLibraryItem = item
-                let permanent = library.url(for: item)
-                output = await inspect(url: permanent)
-                try? FileManager.default.removeItem(at: result)
-            } catch {
-                output = resultInfo
-                noticeText = "The video was converted successfully, but it could not be copied into the app Library. You can still save or share it."
-            }
-            progress = 1
-            stageText = "Done"
+            try await finish(result: result, library: library)
         } catch {
+            // One automatic recovery pass: use the original source and the stable native renderer.
             if let aiTemporary { try? FileManager.default.removeItem(at: aiTemporary) }
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            errorText = message.isEmpty ? "The video could not be converted." : message
+            noticeText = "The first render path was not supported by this clip, so ScreenFlow retried it with the compatibility renderer."
+            progress = 0.04
+            stageText = "Compatibility render"
+            do {
+                let fallback = try await render(sourceURL: input.url, quality: nativeQuality, baseProgress: 0.0, forceFast: true)
+                try await finish(result: fallback, library: library)
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                errorText = message.isEmpty ? "This clip could not be encoded on this device." : message
+            }
         }
+    }
+
+    private func render(sourceURL: URL,
+                        quality: NativeVideoProcessor.OutputQuality,
+                        baseProgress: Double,
+                        forceFast: Bool = false) async throws -> URL {
+        let processor = NativeVideoProcessor()
+        return try await processor.process(
+            sourceURL: sourceURL,
+            targetFPS: targetFPS,
+            quality: quality,
+            mode: forceFast ? .fast : (mode == .smooth ? .smooth : .fast)
+        ) { p, stage in
+            Task { @MainActor in
+                self.progress = min(0.98, baseProgress + p * (1.0 - baseProgress))
+                self.stageText = stage
+            }
+        }
+    }
+
+    private func finish(result: URL, library: LibraryStore) async throws {
+        guard let resultInfo = await inspect(url: result) else {
+            try? FileManager.default.removeItem(at: result)
+            throw NativeVideoProcessor.ProcessorError.export
+        }
+        stageText = "Saving to Library"
+        progress = 0.99
+        do {
+            let item = try library.add(sourceURL: result, info: resultInfo)
+            savedLibraryItem = item
+            output = await inspect(url: library.url(for: item))
+            try? FileManager.default.removeItem(at: result)
+        } catch {
+            output = resultInfo
+            noticeText = "The export finished, but it could not be copied into the app Library. You can still save or share it."
+        }
+        progress = 1
+        stageText = "Done"
     }
 
     private var nativeQuality: NativeVideoProcessor.OutputQuality {
