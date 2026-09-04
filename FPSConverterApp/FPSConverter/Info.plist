@@ -5,14 +5,16 @@
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>2.0</string>
-<key>CFBundleVersion</key><string>20</string>
+<key>CFBundleShortVersionString</key><string>4.0</string>
+<key>CFBundleVersion</key><string>40</string>
 <key>LSRequiresIPhoneOS</key><true/>
-<key>UILaunchScreen</key><dict><key>UIColorName</key><string></string></dict>
+<key>UILaunchScreen</key><dict/>
 <key>UIRequiresFullScreen</key><true/>
+<key>UIDeviceFamily</key><array><integer>1</integer></array>
 <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
 <key>NSPhotoLibraryUsageDescription</key><string>ScreenFlow lets you choose videos to improve frame rate and quality.</string>
 <key>NSPhotoLibraryAddUsageDescription</key><string>ScreenFlow can save completed videos to your photo library.</string>
 <key>UIApplicationSupportsIndirectInputEvents</key><true/>
+<key>UIViewControllerBasedStatusBarAppearance</key><true/>
 </dict></plist>
