@@ -10,7 +10,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         let window = UIWindow(windowScene: windowScene)
         window.backgroundColor = .black
-        window.rootViewController = MainViewController()
+        window.rootViewController = ClassicMainViewController()
         window.frame = windowScene.coordinateSpace.bounds
         window.makeKeyAndVisible()
         self.window = window
