@@ -147,7 +147,7 @@ final class HuggingFaceService: ObservableObject {
         } catch { errorMessage = "AR: \(error.localizedDescription)" }
     }
 
-    private func hunyuanParameters(file: GradioFile) -> [String: GradioValue] {
+    private func hunyuanParameters(file: GradioFileData) -> [String: GradioValue] {
         [
             "caption": .null,
             "image": .file(file),
