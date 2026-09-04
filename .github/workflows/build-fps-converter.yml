@@ -10,17 +10,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install tools
         run: |
-          brew install xcodegen git-lfs
-          git lfs install
-      - name: Bundle PiperSR AI model
+          brew install xcodegen
+      - name: Bundle Real-ESRGAN x2 CoreML model
         run: |
-          rm -rf /tmp/PiperSRHF
-          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://huggingface.co/ModelPiper/PiperSR-2x /tmp/PiperSRHF
-          git -C /tmp/PiperSRHF lfs pull
-          test -f /tmp/PiperSRHF/PiperSR_2x.mlpackage/Data/com.apple.CoreML/model.mlmodel
-          test -f /tmp/PiperSRHF/PiperSR_2x.mlpackage/Data/com.apple.CoreML/weights/weight.bin
-          rm -rf FPSConverterApp/FPSConverter/PiperSR_2x.mlpackage
-          cp -R /tmp/PiperSRHF/PiperSR_2x.mlpackage FPSConverterApp/FPSConverter/
+          rm -rf /tmp/realesrgan /tmp/realesrgan.zip
+          mkdir -p /tmp/realesrgan
+          curl -L --fail --retry 3 \
+            https://github.com/hanxiao/real-esrgan-coreml/releases/download/v1.0.0/RealESRGAN_x2plus_522_fp16.zip \
+            -o /tmp/realesrgan.zip
+          unzip -q /tmp/realesrgan.zip -d /tmp/realesrgan
+          MODEL=$(find /tmp/realesrgan -type d -name '*.mlpackage' | head -1)
+          test -n "$MODEL"
+          rm -rf FPSConverterApp/FPSConverter/RealESRGAN_x2plus_522_fp16.mlpackage
+          cp -R "$MODEL" FPSConverterApp/FPSConverter/RealESRGAN_x2plus_522_fp16.mlpackage
       - name: Generate project
         working-directory: FPSConverterApp
         run: xcodegen generate
