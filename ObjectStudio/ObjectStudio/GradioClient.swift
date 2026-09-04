@@ -7,7 +7,8 @@ struct GradioFileData: Codable {
     let origName: String
     let meta: Meta
 
-    struct Meta: Codable { let type: String
+    struct Meta: Codable {
+        let type: String
         enum CodingKeys: String, CodingKey { case type = "_type" }
     }
 
@@ -42,6 +43,7 @@ enum GradioValue {
 actor GradioClient {
     enum ClientError: LocalizedError {
         case badURL, invalidResponse, server(String), noEventID, timedOut, missingOutput
+
         var errorDescription: String? {
             switch self {
             case .badURL: return "رابط Hugging Face غير صحيح."
@@ -59,17 +61,21 @@ actor GradioClient {
     private let session: URLSession
 
     init(baseURL: String, token: String) throws {
-        guard let url = URL(string: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else { throw ClientError.badURL }
+        guard let url = URL(string: baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))) else {
+            throw ClientError.badURL
+        }
         self.baseURL = url
         self.token = token
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 120
+        config.timeoutIntervalForRequest = 180
         config.timeoutIntervalForResource = 1800
         self.session = URLSession(configuration: config)
     }
 
     private func authorize(_ request: inout URLRequest) {
-        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
     }
 
     func upload(image: UIImage, fileName: String = "product.png") async throws -> GradioFileData {
@@ -91,48 +97,76 @@ actor GradioClient {
 
         let (responseData, response) = try await session.data(for: request)
         try validate(responseData, response)
+
         guard let raw = try JSONSerialization.jsonObject(with: responseData) as? [Any],
               let first = raw.first else { throw ClientError.invalidResponse }
+
         let path: String
-        if let string = first as? String { path = string }
-        else if let dict = first as? [String: Any], let string = dict["path"] as? String { path = string }
-        else { throw ClientError.invalidResponse }
-        return GradioFileData(path: path, url: nil, origName: fileName, meta: .init(type: "gradio.FileData"))
+        if let string = first as? String {
+            path = string
+        } else if let dict = first as? [String: Any], let string = dict["path"] as? String {
+            path = string
+        } else {
+            throw ClientError.invalidResponse
+        }
+
+        return GradioFileData(
+            path: path,
+            url: nil,
+            origName: fileName,
+            meta: .init(type: "gradio.FileData")
+        )
     }
 
-    func call(endpoint: String, parameters: [String: GradioValue], pollEvery: UInt64 = 2_000_000_000, timeout: TimeInterval = 900) async throws -> Any {
+    /// Standard Gradio HTTP API:
+    /// POST /gradio_api/call/{api_name} with {"data": [...]}
+    /// then GET /gradio_api/call/{api_name}/{event_id} for the SSE result.
+    func call(endpoint: String, arguments: [GradioValue], timeout: TimeInterval = 900) async throws -> Any {
         let clean = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let url = baseURL.appending(path: "gradio_api/call/v2/\(clean)")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        authorize(&request)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: parameters.mapValues(\.json))
-        let (data, response) = try await session.data(for: request)
-        try validate(data, response)
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let eventID = object["event_id"] as? String else { throw ClientError.noEventID }
+        let submitURL = baseURL.appending(path: "gradio_api/call/\(clean)")
 
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let pollURL = baseURL.appending(path: "gradio_api/call/\(clean)/\(eventID)")
-            var poll = URLRequest(url: pollURL)
-            authorize(&poll)
-            let (pollData, pollResponse) = try await session.data(for: poll)
-            try validate(pollData, pollResponse)
-            if let value = try parseEventStream(pollData) { return value }
-            try await Task.sleep(nanoseconds: pollEvery)
+        var submit = URLRequest(url: submitURL)
+        submit.httpMethod = "POST"
+        submit.timeoutInterval = 180
+        authorize(&submit)
+        submit.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        submit.httpBody = try JSONSerialization.data(withJSONObject: [
+            "data": arguments.map(\.json)
+        ])
+
+        let (submitData, submitResponse) = try await session.data(for: submit)
+        try validate(submitData, submitResponse)
+
+        guard let object = try JSONSerialization.jsonObject(with: submitData) as? [String: Any],
+              let eventID = object["event_id"] as? String else {
+            throw ClientError.noEventID
         }
-        throw ClientError.timedOut
+
+        let resultURL = baseURL.appending(path: "gradio_api/call/\(clean)/\(eventID)")
+        var resultRequest = URLRequest(url: resultURL)
+        resultRequest.httpMethod = "GET"
+        resultRequest.timeoutInterval = timeout
+        authorize(&resultRequest)
+        resultRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+
+        let (resultData, resultResponse) = try await session.data(for: resultRequest)
+        try validate(resultData, resultResponse)
+        guard let output = try parseEventStream(resultData) else {
+            throw ClientError.missingOutput
+        }
+        return output
     }
 
     func download(_ url: URL) async throws -> URL {
         var request = URLRequest(url: url)
         authorize(&request)
         let (temp, response) = try await session.download(for: request)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { throw ClientError.invalidResponse }
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
+            throw ClientError.invalidResponse
+        }
         let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension
-        let destination = FileManager.default.temporaryDirectory.appending(path: "ObjectStudio-\(UUID().uuidString).\(ext)")
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "ObjectStudio-\(UUID().uuidString).\(ext)")
         try? FileManager.default.removeItem(at: destination)
         try FileManager.default.moveItem(at: temp, to: destination)
         return destination
@@ -140,19 +174,27 @@ actor GradioClient {
 
     static func firstURL(in object: Any, preferredExtensions: Set<String> = []) -> URL? {
         if let string = object as? String, let url = URL(string: string), url.scheme != nil {
-            if preferredExtensions.isEmpty || preferredExtensions.contains(url.pathExtension.lowercased()) { return url }
+            if preferredExtensions.isEmpty || preferredExtensions.contains(url.pathExtension.lowercased()) {
+                return url
+            }
         }
         if let dict = object as? [String: Any] {
             for key in ["url", "value", "path", "video"] {
-                if let item = dict[key], let url = firstURL(in: item, preferredExtensions: preferredExtensions) { return url }
+                if let item = dict[key], let url = firstURL(in: item, preferredExtensions: preferredExtensions) {
+                    return url
+                }
             }
             for value in dict.values {
-                if let url = firstURL(in: value, preferredExtensions: preferredExtensions) { return url }
+                if let url = firstURL(in: value, preferredExtensions: preferredExtensions) {
+                    return url
+                }
             }
         }
         if let array = object as? [Any] {
             for value in array {
-                if let url = firstURL(in: value, preferredExtensions: preferredExtensions) { return url }
+                if let url = firstURL(in: value, preferredExtensions: preferredExtensions) {
+                    return url
+                }
             }
         }
         return nil
@@ -161,25 +203,36 @@ actor GradioClient {
     private func parseEventStream(_ data: Data) throws -> Any? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         var currentEvent = ""
+        var completed: Any?
+
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.hasPrefix("event:") { currentEvent = line.dropFirst(6).trimmingCharacters(in: .whitespaces) }
-            if line.hasPrefix("data:") {
-                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-                if currentEvent == "error" { throw ClientError.server(payload) }
-                if currentEvent == "complete" {
-                    guard let jsonData = payload.data(using: .utf8) else { throw ClientError.invalidResponse }
-                    return try JSONSerialization.jsonObject(with: jsonData)
+            if line.hasPrefix("event:") {
+                currentEvent = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+
+            if currentEvent == "error" {
+                throw ClientError.server(payload)
+            }
+            if currentEvent == "complete" {
+                guard let jsonData = payload.data(using: .utf8) else {
+                    throw ClientError.invalidResponse
                 }
+                completed = try JSONSerialization.jsonObject(with: jsonData)
             }
         }
-        return nil
+        return completed
     }
 
     private func validate(_ data: Data, _ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
+        guard let http = response as? HTTPURLResponse else {
+            throw ClientError.invalidResponse
+        }
         guard 200..<300 ~= http.statusCode else {
             let text = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw ClientError.server("Hugging Face: \(text.prefix(400))")
+            throw ClientError.server("Hugging Face: \(text.prefix(500))")
         }
     }
 }
