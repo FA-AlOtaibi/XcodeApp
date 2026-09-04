@@ -183,8 +183,12 @@ struct ContentView: View {
                 Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 310)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                 HStack(spacing: 10) {
-                    ShareLink(item: ImageTransferable(image: image)) { Label("مشاركة", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity) }.buttonStyle(SecondaryButtonStyle())
-                    Button { UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil) } label: { Label("حفظ", systemImage: "arrow.down.to.line").frame(maxWidth: .infinity) }.buttonStyle(SecondaryButtonStyle())
+                    ShareLink(item: ImageTransferable(image: image), preview: SharePreview("Depth Map", image: Image(uiImage: image))) {
+                        Label("مشاركة", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+                    }.buttonStyle(SecondaryButtonStyle())
+                    Button { UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil) } label: {
+                        Label("حفظ", systemImage: "arrow.down.to.line").frame(maxWidth: .infinity)
+                    }.buttonStyle(SecondaryButtonStyle())
                 }
             }
         }
@@ -194,14 +198,17 @@ struct ContentView: View {
         sectionCard(title: "Multi-angle", subtitle: "زوايا مولدة لنفس المنتج") {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(Array(hf.angleImages.enumerated()), id: \.offset) { index, image in
+                    ForEach(hf.angleImages.indices, id: \.self) { index in
+                        let image = hf.angleImages[index]
                         VStack(alignment: .leading, spacing: 7) {
                             Image(uiImage: image).resizable().scaledToFill().frame(width: 230, height: 230).clipped()
                                 .clipShape(RoundedRectangle(cornerRadius: 18))
                             HStack {
                                 Text(["-90°", "-45°", "+45°", "+90°"][min(index, 3)]).font(.caption.bold())
                                 Spacer()
-                                ShareLink(item: ImageTransferable(image: image)) { Image(systemName: "square.and.arrow.up") }
+                                ShareLink(item: ImageTransferable(image: image), preview: SharePreview("Angle", image: Image(uiImage: image))) {
+                                    Image(systemName: "square.and.arrow.up")
+                                }
                             }.padding(.horizontal, 4)
                         }
                     }
