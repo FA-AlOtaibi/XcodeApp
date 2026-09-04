@@ -1,0 +1,26 @@
+name: FPSConverter
+options:
+  bundleIdPrefix: com.fahad
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  FFmpegIOS:
+    url: https://github.com/kewlbear/FFmpeg-iOS.git
+    from: 0.0.6-b
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+targets:
+  FPSConverter:
+    type: application
+    platform: iOS
+    sources: [FPSConverter]
+    dependencies:
+      - package: FFmpegIOS
+        product: FFmpegSupport
+    info:
+      path: FPSConverter/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fahad.fpsconverter
+        GENERATE_INFOPLIST_FILE: NO
