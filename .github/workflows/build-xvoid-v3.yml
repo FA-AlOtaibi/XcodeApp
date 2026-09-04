@@ -1,0 +1,49 @@
+name: Build XVoid V3 IPA
+
+on:
+  push:
+    branches: ["xvoid-v3-build"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare source
+        run: |
+          rm -rf XVoidV3Build
+          mkdir XVoidV3Build
+          unzip -q XVoidMobile_V3_4K_Enhanced_Source.zip -d XVoidV3Build
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: XVoidV3Build
+        run: xcodegen generate
+      - name: Build unsigned device app
+        working-directory: XVoidV3Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project XVoidMobile.xcodeproj \
+            -scheme XVoidMobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build | tee build.log
+      - name: Package IPA
+        working-directory: XVoidV3Build
+        run: |
+          APP=$(find DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          test -n "$APP"
+          rm -rf Payload XVoidMobile_V3_Unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry XVoidMobile_V3_Unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XVoidMobile_V3_Unsigned_IPA
+          path: XVoidV3Build/XVoidMobile_V3_Unsigned.ipa
