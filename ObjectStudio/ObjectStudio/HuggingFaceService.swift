@@ -99,7 +99,7 @@ final class HuggingFaceService: ObservableObject {
             let file = try await client.upload(image: image)
             progressText = textured ? "نبني المجسم والخامات…" : "نبني المجسم…"
             let endpoint = textured ? "generation_all" : "shape_generation"
-            var params: [String: GradioValue] = [
+            let params: [String: GradioValue] = [
                 "caption": .null,
                 "image": .file(file),
                 "mv_image_front": .null,
@@ -114,9 +114,16 @@ final class HuggingFaceService: ObservableObject {
                 "num_chunks": .number(200000),
                 "randomize_seed": .bool(true)
             ]
-            if textured { params["max_facenum"] = .number(40000) }
             let output = try await client.call(endpoint: endpoint, parameters: params, timeout: 1200)
-            guard let remote = GradioClient.firstURL(in: output, preferredExtensions: ["glb","obj"]) else {
+
+            let remote: URL?
+            if textured, let array = output as? [Any], array.count > 1 {
+                remote = GradioClient.firstURL(in: array[1], preferredExtensions: ["glb","obj"])
+                    ?? GradioClient.firstURL(in: output, preferredExtensions: ["glb","obj"])
+            } else {
+                remote = GradioClient.firstURL(in: output, preferredExtensions: ["glb","obj"])
+            }
+            guard let remote else {
                 throw NSError(domain: "HF", code: -3, userInfo: [NSLocalizedDescriptionKey: "اكتمل Hunyuan3D لكن لم أجد رابط ملف GLB/OBJ في النتيجة."])
             }
             progressText = "ننزل ملف 3D…"
