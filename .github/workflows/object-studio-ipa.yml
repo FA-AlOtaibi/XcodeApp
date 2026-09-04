@@ -1,0 +1,48 @@
+name: Object Studio IPA
+
+on:
+  push:
+    branches: [ object-studio ]
+    paths:
+      - 'ObjectStudio/**'
+      - '.github/workflows/object-studio-ipa.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ObjectStudio
+        run: xcodegen generate
+      - name: Build unsigned app
+        working-directory: ObjectStudio
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project ObjectStudio.xcodeproj \
+            -scheme ObjectStudio \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            build
+      - name: Package IPA
+        working-directory: ObjectStudio
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          test -n "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry ObjectStudio.ipa Payload
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ObjectStudio-IPA
+          path: ObjectStudio/ObjectStudio.ipa
+          if-no-files-found: error
