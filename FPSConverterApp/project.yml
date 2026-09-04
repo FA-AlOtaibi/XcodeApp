@@ -17,7 +17,7 @@ targets:
     sources: [FPSConverter]
     dependencies:
       - package: FFmpegIOS
-        product: FFmpegSupport
+        product: FFmpeg-iOS
     info:
       path: FPSConverter/Info.plist
     settings:
