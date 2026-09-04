@@ -1,0 +1,37 @@
+name: Build XVoid V4 IPA
+
+on:
+  push:
+    branches: [xvoid-v4-build]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble source
+        run: |
+          cat xv4parts/part00 xv4parts/part01 xv4parts/part02 > XVoidMobile_V4_Source.zip
+          rm -rf XVoidV4Build
+          mkdir XVoidV4Build
+          unzip -q XVoidMobile_V4_Source.zip -d XVoidV4Build
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: |
+          cd XVoidV4Build/XVoidMobileV3
+          xcodegen generate
+      - name: Build unsigned device app
+        run: |
+          cd XVoidV4Build/XVoidMobileV3
+          xcodebuild -project XVoidMobile.xcodeproj -scheme XVoidMobile -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -derivedDataPath DerivedData build
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R XVoidV4Build/XVoidMobileV3/DerivedData/Build/Products/Release-iphoneos/XVoidMobile.app Payload/
+          zip -qry XVoidMobile_V4_Unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XVoidMobile_V4_Unsigned_IPA
+          path: XVoidMobile_V4_Unsigned.ipa
