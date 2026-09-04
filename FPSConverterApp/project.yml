@@ -3,26 +3,24 @@ options:
   bundleIdPrefix: com.fahad
   deploymentTarget:
     iOS: "16.0"
-packages:
-  FFmpegIOS:
-    url: https://github.com/kewlbear/FFmpeg-iOS.git
-    from: 0.0.6-b
 settings:
   base:
-    SWIFT_VERSION: 5.0
+    SWIFT_VERSION: 5.9
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
 targets:
   FPSConverter:
     type: application
     platform: iOS
     sources: [FPSConverter]
-    dependencies:
-      - package: FFmpegIOS
-        product: FFmpeg-iOS
     info:
       path: FPSConverter/Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.fahad.fpsconverter
+        PRODUCT_BUNDLE_IDENTIFIER: com.fahad.screenflow
+        PRODUCT_NAME: ScreenFlow
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
-        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
