@@ -10,8 +10,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare source
+      - name: Reassemble source
         run: |
+          cat XVoidV3Parts/part00 XVoidV3Parts/part01 XVoidV3Parts/part02 XVoidV3Parts/part03 > XVoidMobile_V3_4K_Enhanced_Source.zip
+          unzip -t XVoidMobile_V3_4K_Enhanced_Source.zip
           rm -rf XVoidV3Build
           mkdir XVoidV3Build
           unzip -q XVoidMobile_V3_4K_Enhanced_Source.zip -d XVoidV3Build
