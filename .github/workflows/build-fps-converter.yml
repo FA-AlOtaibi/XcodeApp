@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Prepare source
         run: |
-          base64 --decode FPSConverterApp_Source.zip.b64 > FPSConverterApp_Source.zip
+          base64 -D -i FPSConverterApp_Source.zip.b64 -o FPSConverterApp_Source.zip
           unzip -q FPSConverterApp_Source.zip
       - name: Install XcodeGen
         run: brew install xcodegen
