@@ -3,6 +3,10 @@ options:
   bundleIdPrefix: com.fahad
   deploymentTarget:
     iOS: "16.0"
+packages:
+  FFmpegIOS:
+    url: https://github.com/kewlbear/FFmpeg-iOS.git
+    from: 0.0.6-b
 settings:
   base:
     SWIFT_VERSION: 5.9
@@ -15,6 +19,9 @@ targets:
     type: application
     platform: iOS
     sources: [FPSConverter]
+    dependencies:
+      - package: FFmpegIOS
+        product: FFmpeg-iOS
     info:
       path: FPSConverter/Info.plist
     settings:
