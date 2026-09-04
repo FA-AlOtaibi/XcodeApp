@@ -17,7 +17,7 @@ final class NativeVideoProcessor {
         }
     }
 
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    private let context = CIContext(options: [.cacheIntermediates: false, .priorityRequestLow: false])
 
     func process(sourceURL: URL,
                  targetFPS: Int,
@@ -40,22 +40,33 @@ final class NativeVideoProcessor {
 
         progress(0.02, "Preparing video")
         var lastError: Error?
-        for codec in codecPreference(for: quality, fps: targetFPS) {
-            do {
-                try await encodeVideo(asset: asset, track: track, transform: transform,
-                                      targetSize: targetSize, targetFPS: targetFPS,
-                                      mode: mode, codec: codec, outputURL: videoOnly,
-                                      progress: progress)
-                lastError = nil
-                break
-            } catch {
-                lastError = error
-                try? FileManager.default.removeItem(at: videoOnly)
+        let codecs = codecPreference(for: quality, fps: targetFPS)
+        let bitrateScales: [Double] = [1.0, 0.78, 0.60]
+
+        outer: for codec in codecs {
+            for scale in bitrateScales {
+                do {
+                    try await encodeVideo(asset: asset,
+                                          track: track,
+                                          transform: transform,
+                                          targetSize: targetSize,
+                                          targetFPS: targetFPS,
+                                          mode: mode,
+                                          codec: codec,
+                                          bitrateScale: scale,
+                                          outputURL: videoOnly,
+                                          progress: progress)
+                    lastError = nil
+                    break outer
+                } catch {
+                    lastError = error
+                    try? FileManager.default.removeItem(at: videoOnly)
+                }
             }
         }
         if let lastError { throw lastError }
 
-        progress(0.93, "Restoring audio")
+        progress(0.94, "Restoring audio")
         do {
             try await attachAudio(processedVideo: videoOnly, original: asset, outputURL: finalURL)
             try? FileManager.default.removeItem(at: videoOnly)
@@ -97,6 +108,7 @@ final class NativeVideoProcessor {
                              targetFPS: Int,
                              mode: MotionMode,
                              codec: AVVideoCodecType,
+                             bitrateScale: Double,
                              outputURL: URL,
                              progress: @escaping @Sendable (Double, String) -> Void) async throws {
         let duration = try await asset.load(.duration)
@@ -111,15 +123,17 @@ final class NativeVideoProcessor {
         reader.add(readerOutput)
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let bitrate = bitrateFor(size: targetSize, fps: targetFPS, codec: codec)
+        let bitrate = Int(Double(bitrateFor(size: targetSize, fps: targetFPS, codec: codec)) * bitrateScale)
         var compression: [String: Any] = [
             AVVideoAverageBitRateKey: bitrate,
             AVVideoExpectedSourceFrameRateKey: targetFPS,
-            AVVideoMaxKeyFrameIntervalKey: max(targetFPS * 2, 60)
+            AVVideoMaxKeyFrameIntervalKey: max(targetFPS * 2, 60),
+            AVVideoAllowFrameReorderingKey: true
         ]
         if codec == .h264 {
             compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel
         }
+
         let settings: [String: Any] = [
             AVVideoCodecKey: codec,
             AVVideoWidthKey: Int(targetSize.width),
@@ -132,11 +146,12 @@ final class NativeVideoProcessor {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: Int(targetSize.width),
             kCVPixelBufferHeightKey as String: Int(targetSize.height),
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+            kCVPixelBufferMetalCompatibilityKey as String: true
         ])
         guard writer.canAdd(input) else { throw ProcessorError.writer }
         writer.add(input)
-        guard reader.startReading(), writer.startWriting() else { throw ProcessorError.writer }
+        guard reader.startReading(), writer.startWriting() else { throw writer.error ?? ProcessorError.writer }
         writer.startSession(atSourceTime: .zero)
 
         guard let first = readerOutput.copyNextSampleBuffer() else { throw ProcessorError.reader }
@@ -168,12 +183,15 @@ final class NativeVideoProcessor {
                 CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
                 guard let pixel = out else { throw ProcessorError.writer }
                 let processed = enhancedAndScaled(image, targetSize: targetSize)
-                context.render(processed, to: pixel, bounds: CGRect(origin: .zero, size: targetSize), colorSpace: CGColorSpaceCreateDeviceRGB())
+                context.render(processed,
+                               to: pixel,
+                               bounds: CGRect(origin: .zero, size: targetSize),
+                               colorSpace: CGColorSpaceCreateDeviceRGB())
                 let pts = CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)
                 guard adaptor.append(pixel, withPresentationTime: pts) else { throw writer.error ?? ProcessorError.writer }
                 nextOutputSeconds += step
-                let p = min(0.90, 0.05 + (nextOutputSeconds / seconds) * 0.85)
-                progress(p, mode == .smooth ? "Creating smooth motion" : "Converting frame rate")
+                progress(min(0.91, 0.05 + (nextOutputSeconds / seconds) * 0.86),
+                         mode == .smooth ? "Synthesizing smooth motion" : "Converting frame rate")
             }
             previous = next
             current = readerOutput.copyNextSampleBuffer()
@@ -183,14 +201,20 @@ final class NativeVideoProcessor {
             while nextOutputSeconds < seconds {
                 while !input.isReadyForMoreMediaData {
                     try await Task.sleep(nanoseconds: 1_000_000)
+                    if writer.status == .failed { throw writer.error ?? ProcessorError.writer }
                 }
                 guard let pool = adaptor.pixelBufferPool else { throw ProcessorError.writer }
                 var out: CVPixelBuffer?
                 CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
                 guard let pixel = out else { throw ProcessorError.writer }
                 let processed = enhancedAndScaled(orientedImage(from: lastBuffer, transform: transform), targetSize: targetSize)
-                context.render(processed, to: pixel, bounds: CGRect(origin: .zero, size: targetSize), colorSpace: CGColorSpaceCreateDeviceRGB())
-                guard adaptor.append(pixel, withPresentationTime: CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)) else { throw writer.error ?? ProcessorError.writer }
+                context.render(processed,
+                               to: pixel,
+                               bounds: CGRect(origin: .zero, size: targetSize),
+                               colorSpace: CGColorSpaceCreateDeviceRGB())
+                guard adaptor.append(pixel, withPresentationTime: CMTime(seconds: nextOutputSeconds, preferredTimescale: 60000)) else {
+                    throw writer.error ?? ProcessorError.writer
+                }
                 nextOutputSeconds += step
             }
         }
@@ -204,9 +228,9 @@ final class NativeVideoProcessor {
         let pixels = max(1, size.width * size.height)
         let ratio = pixels / (1920 * 1080)
         let fpsRatio = max(1, Double(fps) / 30.0)
-        var mbps = 16.0 * ratio * sqrt(fpsRatio)
-        if codec == .hevc { mbps *= 0.80 }
-        mbps = min(160, max(12, mbps))
+        var mbps = 20.0 * ratio * sqrt(fpsRatio)
+        if codec == .hevc { mbps *= 0.76 }
+        mbps = min(180, max(14, mbps))
         return Int(mbps * 1_000_000)
     }
 
@@ -227,24 +251,35 @@ final class NativeVideoProcessor {
 
     private func enhancedAndScaled(_ image: CIImage, targetSize: CGSize) -> CIImage {
         var result = image
+
         if let noise = CIFilter(name: "CINoiseReduction") {
             noise.setValue(result, forKey: kCIInputImageKey)
-            noise.setValue(0.015, forKey: "inputNoiseLevel")
-            noise.setValue(0.25, forKey: "inputSharpness")
+            noise.setValue(0.01, forKey: "inputNoiseLevel")
+            noise.setValue(0.18, forKey: "inputSharpness")
             result = noise.outputImage ?? result
         }
-        let scale = targetSize.width / max(1, result.extent.width)
-        if let lanczos = CIFilter(name: "CILanczosScaleTransform") {
+
+        let scaleX = targetSize.width / max(1, result.extent.width)
+        if abs(scaleX - 1) > 0.001, let lanczos = CIFilter(name: "CILanczosScaleTransform") {
             lanczos.setValue(result, forKey: kCIInputImageKey)
-            lanczos.setValue(scale, forKey: kCIInputScaleKey)
+            lanczos.setValue(scaleX, forKey: kCIInputScaleKey)
             lanczos.setValue(1.0, forKey: kCIInputAspectRatioKey)
             result = lanczos.outputImage ?? result
         }
-        if let sharp = CIFilter(name: "CISharpenLuminance") {
-            sharp.setValue(result, forKey: kCIInputImageKey)
-            sharp.setValue(0.22, forKey: kCIInputSharpnessKey)
-            result = sharp.outputImage ?? result
+
+        if let unsharp = CIFilter(name: "CIUnsharpMask") {
+            unsharp.setValue(result, forKey: kCIInputImageKey)
+            unsharp.setValue(0.72, forKey: kCIInputIntensityKey)
+            unsharp.setValue(1.15, forKey: kCIInputRadiusKey)
+            result = unsharp.outputImage ?? result
         }
+
+        if let sharpen = CIFilter(name: "CISharpenLuminance") {
+            sharpen.setValue(result, forKey: kCIInputImageKey)
+            sharpen.setValue(0.32, forKey: kCIInputSharpnessKey)
+            result = sharpen.outputImage ?? result
+        }
+
         let e = result.extent
         return result.transformed(by: CGAffineTransform(translationX: -e.origin.x, y: -e.origin.y))
     }
