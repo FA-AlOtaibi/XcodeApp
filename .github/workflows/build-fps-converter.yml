@@ -1,7 +1,7 @@
-name: Build FPS Converter IPA
+name: Build ScreenFlow Native IPA
 on:
   push:
-    branches: [fps-converter-ios]
+    branches: [screenflow-native-rebuild2]
   workflow_dispatch:
 jobs:
   build:
@@ -31,10 +31,11 @@ jobs:
       - name: Package IPA
         working-directory: FPSConverterApp
         run: |
+          rm -rf Payload ScreenFlow_Native_Unsigned.ipa
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/FPSConverter.app Payload/
-          zip -qry FPSConverter_Unsigned.ipa Payload
+          cp -R build/Build/Products/Release-iphoneos/ScreenFlow.app Payload/
+          zip -qry ScreenFlow_Native_Unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: FPSConverter_Unsigned_IPA
-          path: FPSConverterApp/FPSConverter_Unsigned.ipa
+          name: ScreenFlow_Native_Unsigned_IPA
+          path: FPSConverterApp/ScreenFlow_Native_Unsigned.ipa
