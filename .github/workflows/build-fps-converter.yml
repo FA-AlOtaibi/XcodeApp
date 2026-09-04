@@ -8,12 +8,16 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install tools
+        run: |
+          brew install xcodegen git-lfs
+          git lfs install
       - name: Bundle PiperSR AI model
         run: |
           rm -rf /tmp/PiperSR
-          git clone --depth 1 https://github.com/ModelPiper/PiperSR.git /tmp/PiperSR
+          GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 https://github.com/ModelPiper/PiperSR.git /tmp/PiperSR
+          git -C /tmp/PiperSR lfs pull
+          test -f /tmp/PiperSR/PiperSR_2x.mlpackage/Data/com.apple.CoreML/model.mlmodel
           rm -rf FPSConverterApp/FPSConverter/PiperSR_2x.mlpackage
           cp -R /tmp/PiperSR/PiperSR_2x.mlpackage FPSConverterApp/FPSConverter/
       - name: Generate project
