@@ -14,6 +14,7 @@ final class HuggingFaceService: ObservableObject {
     @Published var qwenHost = "https://multimodalart-qwen-image-edit-angles-2.hf.space"
     @Published var hunyuanHost = "https://tencent-hunyuan3d-2-1.hf.space"
     @Published var depthHost = "https://depth-anything-depth-anything-v2.hf.space"
+    @Published var depthModel = "depth-anything/Depth-Anything-V2"
 
     var token: String {
         get { KeychainStore.read("hf_token") }
@@ -51,7 +52,6 @@ final class HuggingFaceService: ObservableObject {
                 throw NSError(domain: "HF", code: -10, userInfo: [NSLocalizedDescriptionKey: "Depth Anything أعاد استجابة غير متوقعة."])
             }
 
-            // Official Space returns: slider result, grayscale file, 16-bit raw file.
             let candidate: Any = array.count > 1 ? array[1] : output
             guard let remote = GradioClient.firstURL(in: candidate, preferredExtensions: ["png", "jpg", "jpeg", "webp"]) ?? GradioClient.firstURL(in: output, preferredExtensions: ["png", "jpg", "jpeg", "webp"]) else {
                 throw NSError(domain: "HF", code: -11, userInfo: [NSLocalizedDescriptionKey: "لم أجد ملف خريطة العمق في النتيجة."])
