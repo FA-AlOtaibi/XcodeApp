@@ -8,14 +8,13 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
     private let model = VideoModel()
     private let library = LibraryStore()
 
-    private let header = UIView()
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
     private let preview = UIView()
     private let placeholder = UIStackView()
     private let playerVC = AVPlayerViewController()
     private var player: AVPlayer?
 
-    private let controlsScroll = UIScrollView()
-    private let controlsStack = UIStackView()
     private let fps = UISegmentedControl(items: ["24", "30", "60", "120"])
     private let resolution = UISegmentedControl(items: ["Native", "2K", "4K"])
     private let motion = UISegmentedControl(items: ["Fast", "Smooth"])
@@ -33,30 +32,74 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        buildHeader()
-        buildPreview()
-        buildActionButton()
-        buildControls()
+        buildRootLayout()
         buildOverlay()
         applyDefaults()
     }
 
-    private func buildHeader() {
-        header.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(header)
+    private func buildRootLayout() {
+        buildActionButton()
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.alwaysBounceVertical = true
+        scrollView.keyboardDismissMode = .interactive
+        view.addSubview(scrollView)
+
+        contentStack.axis = .vertical
+        contentStack.spacing = 14
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(contentStack)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: actionButton.topAnchor, constant: -10),
+
+            contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 8),
+            contentStack.leadingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.leadingAnchor, constant: 16),
+            contentStack.trailingAnchor.constraint(equalTo: scrollView.frameLayoutGuide.trailingAnchor, constant: -16),
+            contentStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -16)
+        ])
+
+        contentStack.addArrangedSubview(makeHeader())
+        contentStack.addArrangedSubview(makePreview())
+        contentStack.addArrangedSubview(makeImportButtons())
+        contentStack.addArrangedSubview(makeSection(title: "Frame rate", subtitle: "Choose the output FPS", control: fps))
+        contentStack.addArrangedSubview(makeSection(title: "Resolution", subtitle: "Keep native size or upscale", control: resolution))
+        contentStack.addArrangedSubview(makeAISection())
+        contentStack.addArrangedSubview(makeSection(title: "Motion", subtitle: "Smooth creates in-between frames", control: motion))
+
+        [fps, resolution, motion].forEach(configureSegmented)
+        fps.addTarget(self, action: #selector(fpsChanged), for: .valueChanged)
+        resolution.addTarget(self, action: #selector(resChanged), for: .valueChanged)
+        motion.addTarget(self, action: #selector(motionChanged), for: .valueChanged)
+        aiSwitch.addTarget(self, action: #selector(aiChanged), for: .valueChanged)
+    }
+
+    private func makeHeader() -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 12
+
+        let text = UIStackView()
+        text.axis = .vertical
+        text.spacing = 1
 
         let title = UILabel()
         title.text = "ScreenFlow"
         title.textColor = .white
         title.font = .systemFont(ofSize: 30, weight: .bold)
-        title.adjustsFontForContentSizeCategory = true
-        title.translatesAutoresizingMaskIntoConstraints = false
 
         let subtitle = UILabel()
         subtitle.text = "FPS + AI Video Enhancer"
         subtitle.textColor = UIColor.white.withAlphaComponent(0.42)
         subtitle.font = .systemFont(ofSize: 13, weight: .medium)
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
+
+        text.addArrangedSubview(title)
+        text.addArrangedSubview(subtitle)
 
         let libraryButton = UIButton(type: .system)
         var cfg = UIButton.Configuration.filled()
@@ -65,54 +108,41 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         cfg.baseForegroundColor = .white
         cfg.cornerStyle = .capsule
         libraryButton.configuration = cfg
-        libraryButton.translatesAutoresizingMaskIntoConstraints = false
+        libraryButton.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        libraryButton.heightAnchor.constraint(equalToConstant: 48).isActive = true
         libraryButton.addTarget(self, action: #selector(openLibrary), for: .touchUpInside)
 
-        [title, subtitle, libraryButton].forEach(header.addSubview)
-        NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
-            header.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18),
-            header.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -18),
-            header.heightAnchor.constraint(equalToConstant: 58),
-
-            title.leadingAnchor.constraint(equalTo: header.leadingAnchor),
-            title.topAnchor.constraint(equalTo: header.topAnchor, constant: 1),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: libraryButton.leadingAnchor, constant: -12),
-
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: -1),
-            subtitle.trailingAnchor.constraint(lessThanOrEqualTo: libraryButton.leadingAnchor, constant: -12),
-
-            libraryButton.trailingAnchor.constraint(equalTo: header.trailingAnchor),
-            libraryButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            libraryButton.widthAnchor.constraint(equalToConstant: 46),
-            libraryButton.heightAnchor.constraint(equalToConstant: 46)
-        ])
+        row.addArrangedSubview(text)
+        row.addArrangedSubview(libraryButton)
+        return row
     }
 
-    private func buildPreview() {
-        preview.translatesAutoresizingMaskIntoConstraints = false
+    private func makePreview() -> UIView {
         preview.backgroundColor = UIColor(white: 0.055, alpha: 1)
         preview.layer.cornerRadius = 22
         preview.layer.cornerCurve = .continuous
         preview.clipsToBounds = true
-        view.addSubview(preview)
 
-        let ratio = preview.heightAnchor.constraint(equalTo: preview.widthAnchor, multiplier: 0.68)
-        ratio.priority = .defaultHigh
-        let minH = preview.heightAnchor.constraint(greaterThanOrEqualToConstant: 220)
-        let maxH = preview.heightAnchor.constraint(lessThanOrEqualToConstant: 310)
+        let aspect = preview.heightAnchor.constraint(equalTo: preview.widthAnchor, multiplier: 0.62)
+        aspect.priority = .required
+        aspect.isActive = true
 
+        addChild(playerVC)
+        let playerView = playerVC.view!
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+        playerView.isHidden = true
+        preview.addSubview(playerView)
         NSLayoutConstraint.activate([
-            preview.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
-            preview.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            preview.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            ratio, minH, maxH
+            playerView.topAnchor.constraint(equalTo: preview.topAnchor),
+            playerView.leadingAnchor.constraint(equalTo: preview.leadingAnchor),
+            playerView.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
+            playerView.bottomAnchor.constraint(equalTo: preview.bottomAnchor)
         ])
+        playerVC.didMove(toParent: self)
 
         placeholder.axis = .vertical
         placeholder.alignment = .center
-        placeholder.spacing = 8
+        placeholder.spacing = 7
         placeholder.translatesAutoresizingMaskIntoConstraints = false
         preview.addSubview(placeholder)
         NSLayoutConstraint.activate([
@@ -125,38 +155,152 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         let icon = UIImageView(image: UIImage(systemName: "video.badge.plus"))
         icon.tintColor = .white
         icon.contentMode = .scaleAspectFit
-        icon.widthAnchor.constraint(equalToConstant: 48).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        icon.widthAnchor.constraint(equalToConstant: 46).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 46).isActive = true
 
         let title = UILabel()
         title.text = "Choose a video"
         title.textColor = .white
-        title.font = .systemFont(ofSize: 23, weight: .bold)
+        title.font = .systemFont(ofSize: 22, weight: .bold)
         title.textAlignment = .center
 
         let sub = UILabel()
         sub.text = "Photos or Files"
-        sub.textColor = UIColor.white.withAlphaComponent(0.43)
-        sub.font = .systemFont(ofSize: 14, weight: .medium)
+        sub.textColor = UIColor.white.withAlphaComponent(0.42)
+        sub.font = .systemFont(ofSize: 13, weight: .medium)
         sub.textAlignment = .center
-
-        let files = UIButton(type: .system)
-        var fc = UIButton.Configuration.filled()
-        fc.title = "Files"
-        fc.image = UIImage(systemName: "folder")
-        fc.imagePadding = 6
-        fc.baseBackgroundColor = UIColor.white.withAlphaComponent(0.08)
-        fc.baseForegroundColor = .white
-        fc.cornerStyle = .capsule
-        files.configuration = fc
-        files.heightAnchor.constraint(equalToConstant: 38).isActive = true
-        files.addTarget(self, action: #selector(openFiles), for: .touchUpInside)
 
         placeholder.addArrangedSubview(icon)
         placeholder.addArrangedSubview(title)
         placeholder.addArrangedSubview(sub)
-        placeholder.addArrangedSubview(files)
         placeholder.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(openPhotos)))
+        return preview
+    }
+
+    private func makeImportButtons() -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = 10
+        row.distribution = .fillEqually
+
+        let photos = smallButton(title: "Photos", icon: "photo.on.rectangle.angled", primary: true)
+        photos.addTarget(self, action: #selector(openPhotos), for: .touchUpInside)
+        let files = smallButton(title: "Files", icon: "folder", primary: false)
+        files.addTarget(self, action: #selector(openFiles), for: .touchUpInside)
+
+        row.addArrangedSubview(photos)
+        row.addArrangedSubview(files)
+        row.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        return row
+    }
+
+    private func makeSection(title: String, subtitle: String, control: UISegmentedControl) -> UIView {
+        let card = cardView()
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 9
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
+
+        let titleLabel = UILabel()
+        titleLabel.text = title
+        titleLabel.textColor = .white
+        titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+
+        let subtitleLabel = UILabel()
+        subtitleLabel.text = subtitle
+        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.38)
+        subtitleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+
+        let heading = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
+        heading.axis = .vertical
+        heading.spacing = 1
+
+        stack.addArrangedSubview(heading)
+        stack.addArrangedSubview(control)
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 15),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 15),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -15),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -15)
+        ])
+        return card
+    }
+
+    private func makeAISection() -> UIView {
+        let card = cardView()
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(row)
+
+        let text = UIStackView()
+        text.axis = .vertical
+        text.spacing = 2
+
+        let title = UILabel()
+        title.text = "AI Super Resolution"
+        title.textColor = .white
+        title.font = .systemFont(ofSize: 18, weight: .bold)
+        title.adjustsFontSizeToFitWidth = true
+        title.minimumScaleFactor = 0.78
+
+        let subtitle = UILabel()
+        subtitle.text = "Real-ESRGAN x2 detail recovery"
+        subtitle.textColor = UIColor.white.withAlphaComponent(0.38)
+        subtitle.font = .systemFont(ofSize: 12, weight: .medium)
+
+        text.addArrangedSubview(title)
+        text.addArrangedSubview(subtitle)
+
+        aiSwitch.onTintColor = .white
+        aiSwitch.thumbTintColor = .black
+        aiSwitch.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        row.addArrangedSubview(text)
+        row.addArrangedSubview(aiSwitch)
+
+        NSLayoutConstraint.activate([
+            row.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            row.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 15),
+            row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -15),
+            row.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16)
+        ])
+        return card
+    }
+
+    private func cardView() -> UIView {
+        let card = UIView()
+        card.backgroundColor = UIColor(white: 0.055, alpha: 1)
+        card.layer.cornerRadius = 18
+        card.layer.cornerCurve = .continuous
+        card.layer.borderColor = UIColor.white.withAlphaComponent(0.05).cgColor
+        card.layer.borderWidth = 1
+        return card
+    }
+
+    private func configureSegmented(_ control: UISegmentedControl) {
+        control.selectedSegmentTintColor = .white
+        control.backgroundColor = UIColor.white.withAlphaComponent(0.055)
+        control.setTitleTextAttributes([.foregroundColor: UIColor.black, .font: UIFont.systemFont(ofSize: 14, weight: .bold)], for: .selected)
+        control.setTitleTextAttributes([.foregroundColor: UIColor.white.withAlphaComponent(0.58), .font: UIFont.systemFont(ofSize: 14, weight: .semibold)], for: .normal)
+        control.heightAnchor.constraint(equalToConstant: 44).isActive = true
+    }
+
+    private func smallButton(title: String, icon: String, primary: Bool) -> UIButton {
+        let button = UIButton(type: .system)
+        var cfg = UIButton.Configuration.filled()
+        cfg.title = title
+        cfg.image = UIImage(systemName: icon)
+        cfg.imagePadding = 8
+        cfg.baseBackgroundColor = primary ? .white : UIColor.white.withAlphaComponent(0.08)
+        cfg.baseForegroundColor = primary ? .black : .white
+        cfg.cornerStyle = .large
+        button.configuration = cfg
+        return button
     }
 
     private func buildActionButton() {
@@ -169,7 +313,6 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         cfg.baseForegroundColor = .black
         cfg.cornerStyle = .large
         actionButton.configuration = cfg
-        actionButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .bold)
         actionButton.addTarget(self, action: #selector(convertTapped), for: .touchUpInside)
         view.addSubview(actionButton)
 
@@ -179,134 +322,6 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
             actionButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8),
             actionButton.heightAnchor.constraint(equalToConstant: 60)
         ])
-    }
-
-    private func buildControls() {
-        controlsScroll.translatesAutoresizingMaskIntoConstraints = false
-        controlsScroll.showsVerticalScrollIndicator = false
-        controlsScroll.alwaysBounceVertical = false
-        view.addSubview(controlsScroll)
-
-        controlsStack.axis = .vertical
-        controlsStack.spacing = 9
-        controlsStack.translatesAutoresizingMaskIntoConstraints = false
-        controlsScroll.addSubview(controlsStack)
-
-        NSLayoutConstraint.activate([
-            controlsScroll.topAnchor.constraint(equalTo: preview.bottomAnchor, constant: 10),
-            controlsScroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            controlsScroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            controlsScroll.bottomAnchor.constraint(equalTo: actionButton.topAnchor, constant: -10),
-
-            controlsStack.topAnchor.constraint(equalTo: controlsScroll.contentLayoutGuide.topAnchor),
-            controlsStack.bottomAnchor.constraint(equalTo: controlsScroll.contentLayoutGuide.bottomAnchor),
-            controlsStack.leadingAnchor.constraint(equalTo: controlsScroll.frameLayoutGuide.leadingAnchor, constant: 16),
-            controlsStack.trailingAnchor.constraint(equalTo: controlsScroll.frameLayoutGuide.trailingAnchor, constant: -16)
-        ])
-
-        [fps, resolution, motion].forEach(configureSegmented)
-        fps.addTarget(self, action: #selector(fpsChanged), for: .valueChanged)
-        resolution.addTarget(self, action: #selector(resChanged), for: .valueChanged)
-        motion.addTarget(self, action: #selector(motionChanged), for: .valueChanged)
-        aiSwitch.addTarget(self, action: #selector(aiChanged), for: .valueChanged)
-
-        controlsStack.addArrangedSubview(controlRow(title: "Frame Rate", subtitle: "Output FPS", control: fps))
-        controlsStack.addArrangedSubview(controlRow(title: "Resolution", subtitle: "Output size", control: resolution))
-        controlsStack.addArrangedSubview(aiRow())
-        controlsStack.addArrangedSubview(controlRow(title: "Motion", subtitle: "Interpolation", control: motion))
-    }
-
-    private func configureSegmented(_ control: UISegmentedControl) {
-        control.selectedSegmentTintColor = .white
-        control.backgroundColor = UIColor.white.withAlphaComponent(0.055)
-        control.setTitleTextAttributes([.foregroundColor: UIColor.black, .font: UIFont.systemFont(ofSize: 14, weight: .bold)], for: .selected)
-        control.setTitleTextAttributes([.foregroundColor: UIColor.white.withAlphaComponent(0.58), .font: UIFont.systemFont(ofSize: 14, weight: .semibold)], for: .normal)
-        control.heightAnchor.constraint(equalToConstant: 42).isActive = true
-    }
-
-    private func controlRow(title: String, subtitle: String, control: UIView) -> UIView {
-        let box = UIView()
-        box.backgroundColor = UIColor(white: 0.055, alpha: 1)
-        box.layer.cornerRadius = 17
-        box.layer.cornerCurve = .continuous
-        box.heightAnchor.constraint(equalToConstant: 68).isActive = true
-
-        let titleLabel = UILabel()
-        titleLabel.text = title
-        titleLabel.textColor = .white
-        titleLabel.font = .systemFont(ofSize: 16, weight: .bold)
-        titleLabel.adjustsFontSizeToFitWidth = true
-        titleLabel.minimumScaleFactor = 0.8
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        let subtitleLabel = UILabel()
-        subtitleLabel.text = subtitle
-        subtitleLabel.textColor = UIColor.white.withAlphaComponent(0.34)
-        subtitleLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        control.translatesAutoresizingMaskIntoConstraints = false
-        box.addSubview(titleLabel)
-        box.addSubview(subtitleLabel)
-        box.addSubview(control)
-
-        NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 15),
-            titleLabel.topAnchor.constraint(equalTo: box.topAnchor, constant: 14),
-            titleLabel.widthAnchor.constraint(equalTo: box.widthAnchor, multiplier: 0.27),
-
-            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
-            subtitleLabel.widthAnchor.constraint(equalTo: titleLabel.widthAnchor),
-
-            control.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 10),
-            control.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -12),
-            control.centerYAnchor.constraint(equalTo: box.centerYAnchor)
-        ])
-        return box
-    }
-
-    private func aiRow() -> UIView {
-        let box = UIView()
-        box.backgroundColor = UIColor(white: 0.055, alpha: 1)
-        box.layer.cornerRadius = 17
-        box.layer.cornerCurve = .continuous
-        box.heightAnchor.constraint(equalToConstant: 64).isActive = true
-
-        let textStack = UIStackView()
-        textStack.axis = .vertical
-        textStack.spacing = 2
-        textStack.translatesAutoresizingMaskIntoConstraints = false
-
-        let title = UILabel()
-        title.text = "AI Super Resolution"
-        title.textColor = .white
-        title.font = .systemFont(ofSize: 16, weight: .bold)
-        title.adjustsFontSizeToFitWidth = true
-        title.minimumScaleFactor = 0.82
-
-        let sub = UILabel()
-        sub.text = "Real-ESRGAN x2 detail recovery"
-        sub.textColor = UIColor.white.withAlphaComponent(0.34)
-        sub.font = .systemFont(ofSize: 11, weight: .medium)
-
-        textStack.addArrangedSubview(title)
-        textStack.addArrangedSubview(sub)
-
-        aiSwitch.onTintColor = .white
-        aiSwitch.thumbTintColor = .black
-        aiSwitch.translatesAutoresizingMaskIntoConstraints = false
-
-        box.addSubview(textStack)
-        box.addSubview(aiSwitch)
-        NSLayoutConstraint.activate([
-            textStack.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 15),
-            textStack.centerYAnchor.constraint(equalTo: box.centerYAnchor),
-            textStack.trailingAnchor.constraint(equalTo: aiSwitch.leadingAnchor, constant: -14),
-            aiSwitch.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -15),
-            aiSwitch.centerYAnchor.constraint(equalTo: box.centerYAnchor)
-        ])
-        return box
     }
 
     private func buildOverlay() {
@@ -326,7 +341,7 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         percent.textAlignment = .center
         percent.translatesAutoresizingMaskIntoConstraints = false
 
-        stage.textColor = UIColor.white.withAlphaComponent(0.6)
+        stage.textColor = UIColor.white.withAlphaComponent(0.62)
         stage.font = .systemFont(ofSize: 16, weight: .semibold)
         stage.textAlignment = .center
         stage.numberOfLines = 2
@@ -339,13 +354,13 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         [percent, stage, progress].forEach(overlay.addSubview)
         NSLayoutConstraint.activate([
             percent.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            percent.centerYAnchor.constraint(equalTo: overlay.centerYAnchor, constant: -32),
+            percent.centerYAnchor.constraint(equalTo: overlay.centerYAnchor, constant: -30),
             stage.topAnchor.constraint(equalTo: percent.bottomAnchor, constant: 12),
-            stage.leadingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 30),
-            stage.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -30),
+            stage.leadingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 28),
+            stage.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -28),
             progress.topAnchor.constraint(equalTo: stage.bottomAnchor, constant: 24),
-            progress.leadingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 46),
-            progress.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -46)
+            progress.leadingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 44),
+            progress.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -44)
         ])
     }
 
@@ -396,7 +411,7 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         var config = PHPickerConfiguration(photoLibrary: .shared())
         config.filter = .videos
         config.selectionLimit = 1
-        config.preferredAssetRepresentationMode = .current
+        config.preferredAssetRepresentationMode = .compatible
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = self
         present(picker, animated: true)
@@ -405,55 +420,93 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
     @objc private func openFiles() {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.movie, .video], asCopy: true)
         picker.delegate = self
+        picker.allowsMultipleSelection = false
         present(picker, animated: true)
     }
 
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
         guard let provider = results.first?.itemProvider else { return }
-        let type = provider.registeredTypeIdentifiers.first ?? UTType.movie.identifier
-        provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, _ in
-            guard let self, let url else { return }
-            let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension
-            let copy = FileManager.default.temporaryDirectory.appendingPathComponent("screenflow_input_\(UUID().uuidString).\(ext)")
-            try? FileManager.default.removeItem(at: copy)
-            do {
-                try FileManager.default.copyItem(at: url, to: copy)
-                Task { @MainActor in await self.load(copy) }
-            } catch {
-                Task { @MainActor in self.showError("Could not import this video.") }
+        actionButton.isEnabled = false
+        actionButton.configuration?.title = "Importing…"
+
+        let preferredType: String = {
+            if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) { return UTType.movie.identifier }
+            if provider.hasItemConformingToTypeIdentifier(UTType.video.identifier) { return UTType.video.identifier }
+            return provider.registeredTypeIdentifiers.first ?? UTType.movie.identifier
+        }()
+
+        provider.loadFileRepresentation(forTypeIdentifier: preferredType) { [weak self] url, fileError in
+            guard let self else { return }
+            if let url, let copied = self.copyImportedFile(url: url) {
+                Task { @MainActor in await self.finishImport(copied) }
+                return
+            }
+
+            provider.loadDataRepresentation(forTypeIdentifier: preferredType) { [weak self] data, dataError in
+                guard let self else { return }
+                guard let data else {
+                    Task { @MainActor in
+                        self.actionButton.isEnabled = true
+                        self.updateAction()
+                        let message = dataError?.localizedDescription ?? fileError?.localizedDescription ?? "Could not import this video from Photos."
+                        self.showError(message)
+                    }
+                    return
+                }
+                let ext = UTType(preferredType)?.preferredFilenameExtension ?? "mov"
+                let dest = FileManager.default.temporaryDirectory.appendingPathComponent("screenflow_\(UUID().uuidString).\(ext)")
+                do {
+                    try data.write(to: dest, options: .atomic)
+                    Task { @MainActor in await self.finishImport(dest) }
+                } catch {
+                    Task { @MainActor in
+                        self.actionButton.isEnabled = true
+                        self.updateAction()
+                        self.showError("The video was selected, but ScreenFlow could not copy it into the app.")
+                    }
+                }
             }
         }
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-        guard let url = urls.first else { return }
-        Task { @MainActor in await load(url) }
+        guard let source = urls.first else { return }
+        let scoped = source.startAccessingSecurityScopedResource()
+        defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+
+        guard let copied = copyImportedFile(url: source) else {
+            showError("ScreenFlow could not copy this file into the app.")
+            return
+        }
+        Task { await finishImport(copied) }
     }
 
-    private func load(_ url: URL) async {
+    private nonisolated func copyImportedFile(url: URL) -> URL? {
+        let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("screenflow_\(UUID().uuidString).\(ext)")
+        do {
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.copyItem(at: url, to: destination)
+            return destination
+        } catch {
+            return nil
+        }
+    }
+
+    private func finishImport(_ url: URL) async {
         await model.setInput(url: url)
+        actionButton.isEnabled = true
         guard let info = model.input else {
-            showError(model.errorText ?? "Could not read this video.")
+            updateAction()
+            showError(model.errorText ?? "ScreenFlow could not read this video.")
             return
         }
 
-        placeholder.isHidden = true
-        if playerVC.parent == nil {
-            addChild(playerVC)
-            let playerView = playerVC.view!
-            playerView.translatesAutoresizingMaskIntoConstraints = false
-            preview.addSubview(playerView)
-            NSLayoutConstraint.activate([
-                playerView.topAnchor.constraint(equalTo: preview.topAnchor),
-                playerView.leadingAnchor.constraint(equalTo: preview.leadingAnchor),
-                playerView.trailingAnchor.constraint(equalTo: preview.trailingAnchor),
-                playerView.bottomAnchor.constraint(equalTo: preview.bottomAnchor)
-            ])
-            playerVC.didMove(toParent: self)
-        }
         player = AVPlayer(url: info.url)
         playerVC.player = player
+        playerVC.view.isHidden = false
+        placeholder.isHidden = true
         updateAction()
         SFNativeBridge.impactSuccess()
     }
@@ -465,10 +518,6 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
         }
 
         overlay.isHidden = false
-        percent.text = "0%"
-        stage.text = "Preparing"
-        progress.progress = 0
-
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -478,28 +527,27 @@ final class MainViewController: UIViewController, PHPickerViewControllerDelegate
             self.stage.text = self.model.stageText
         }
 
-        Task { @MainActor in
+        Task {
             await model.convert(library: library)
             timer?.invalidate()
             timer = nil
             overlay.isHidden = true
             if let error = model.errorText {
                 showError(error)
-            } else if let output = model.output {
+            } else {
                 SFNativeBridge.impactSuccess()
-                showCompletion(output)
+                showCompletion()
             }
         }
     }
 
-    private func showCompletion(_ info: VideoModel.Info) {
-        let alert = UIAlertController(title: "Saved", message: "\(info.resolutionText) · \(info.fpsText) · \(info.sizeText)", preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Save to Photos", style: .default) { _ in self.model.saveToPhotos() })
+    private func showCompletion() {
+        let alert = UIAlertController(title: "Saved", message: "The enhanced video was saved to ScreenFlow Library.", preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "Open Library", style: .default) { _ in self.openLibrary() })
         alert.addAction(UIAlertAction(title: "Done", style: .cancel))
-        if let pop = alert.popoverPresentationController {
-            pop.sourceView = actionButton
-            pop.sourceRect = actionButton.bounds
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = actionButton
+            popover.sourceRect = actionButton.bounds
         }
         present(alert, animated: true)
     }
@@ -536,8 +584,8 @@ final class LibraryViewController: UITableViewController {
         tableView.backgroundColor = .black
         tableView.separatorColor = UIColor.white.withAlphaComponent(0.08)
         navigationController?.navigationBar.prefersLargeTitles = true
-        navigationController?.navigationBar.tintColor = .white
         navigationController?.navigationBar.barStyle = .black
+        navigationController?.navigationBar.tintColor = .white
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Done", style: .done, target: self, action: #selector(done))
     }
 
@@ -548,16 +596,13 @@ final class LibraryViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let id = "video"
-        let cell = tableView.dequeueReusableCell(withIdentifier: id) ?? UITableViewCell(style: .subtitle, reuseIdentifier: id)
+        let cell = tableView.dequeueReusableCell(withIdentifier: "video") ?? UITableViewCell(style: .subtitle, reuseIdentifier: "video")
         let item = store.items[indexPath.row]
-        var content = cell.defaultContentConfiguration()
-        content.text = item.title
-        content.secondaryText = "\(item.durationText) · \(item.sizeText)"
-        content.textProperties.color = .white
-        content.secondaryTextProperties.color = UIColor.white.withAlphaComponent(0.48)
-        cell.contentConfiguration = content
         cell.backgroundColor = UIColor(white: 0.055, alpha: 1)
+        cell.textLabel?.textColor = .white
+        cell.detailTextLabel?.textColor = UIColor.white.withAlphaComponent(0.48)
+        cell.textLabel?.text = item.title
+        cell.detailTextLabel?.text = "\(item.durationText) · \(item.sizeText)"
         cell.accessoryType = .disclosureIndicator
         return cell
     }
