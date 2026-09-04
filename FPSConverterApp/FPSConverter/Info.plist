@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleDisplayName</key><string>FPS Converter</string>
+<key>CFBundleDisplayName</key><string>ScreenFlow</string>
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>2.0</string>
+<key>CFBundleVersion</key><string>20</string>
 <key>LSRequiresIPhoneOS</key><true/>
-<key>UILaunchScreen</key><dict/>
+<key>UILaunchScreen</key><dict><key>UIColorName</key><string></string></dict>
+<key>UIRequiresFullScreen</key><true/>
 <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
-<key>NSPhotoLibraryUsageDescription</key><string>Choose a video to convert its frame rate.</string>
-<key>NSPhotoLibraryAddUsageDescription</key><string>Save converted videos to your photo library.</string>
+<key>NSPhotoLibraryUsageDescription</key><string>ScreenFlow lets you choose videos to improve frame rate and quality.</string>
+<key>NSPhotoLibraryAddUsageDescription</key><string>ScreenFlow can save completed videos to your photo library.</string>
+<key>UIApplicationSupportsIndirectInputEvents</key><true/>
 </dict></plist>
