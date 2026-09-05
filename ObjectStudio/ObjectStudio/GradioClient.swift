@@ -82,13 +82,9 @@ actor GradioClient {
         guard let data = image.pngData() else { throw ClientError.invalidResponse }
         let candidates = ["gradio_api/upload", "upload"]
         var lastError: Error?
-
         for route in candidates {
-            do {
-                return try await upload(data: data, fileName: fileName, route: route)
-            } catch {
-                lastError = error
-            }
+            do { return try await upload(data: data, fileName: fileName, route: route) }
+            catch { lastError = error }
         }
         throw lastError ?? ClientError.invalidResponse
     }
@@ -111,11 +107,9 @@ actor GradioClient {
 
         let (responseData, response) = try await session.data(for: request)
         try validate(responseData, response)
-
         guard let raw = try JSONSerialization.jsonObject(with: responseData) as? [Any], let first = raw.first else {
             throw ClientError.invalidResponse
         }
-
         if let string = first as? String {
             return GradioFileData(path: string, url: nil, origName: fileName, meta: .init(type: "gradio.FileData"))
         }
@@ -127,29 +121,35 @@ actor GradioClient {
         throw ClientError.invalidResponse
     }
 
-    /// Works with both older Spaces (Gradio 4.x: /call/...) and newer Spaces
-    /// (/gradio_api/call/...). Each route uses {"data": [...]} and returns an event_id.
+    // Classic Gradio event API: {"data":[...]}
     func call(endpoint: String, arguments: [GradioValue], timeout: TimeInterval = 900) async throws -> Any {
         let clean = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let routes = [
             (submit: "gradio_api/call/\(clean)", result: "gradio_api/call/\(clean)"),
             (submit: "call/\(clean)", result: "call/\(clean)")
         ]
-
         var errors: [String] = []
         for route in routes {
             do {
-                return try await callRoute(submitRoute: route.submit, resultRoute: route.result, arguments: arguments, timeout: timeout)
-            } catch {
-                errors.append(error.localizedDescription)
-            }
+                return try await callRoute(submitRoute: route.submit, resultRoute: route.result, body: ["data": arguments.map(\.json)], timeout: timeout)
+            } catch { errors.append(error.localizedDescription) }
         }
-
-        let compact = errors.joined(separator: " | ")
-        throw ClientError.server(compact.isEmpty ? "تعذر تشغيل Hugging Face Space." : compact)
+        throw ClientError.server(errors.joined(separator: " | "))
     }
 
-    private func callRoute(submitRoute: String, resultRoute: String, arguments: [GradioValue], timeout: TimeInterval) async throws -> Any {
+    // Gradio 6 gr.api() endpoint: POST /gradio_api/call/v2/<name> with named JSON params.
+    func callV2(endpoint: String, namedArguments: [String: GradioValue], timeout: TimeInterval = 900) async throws -> Any {
+        let clean = endpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let body = namedArguments.mapValues(\.json)
+        return try await callRoute(
+            submitRoute: "gradio_api/call/v2/\(clean)",
+            resultRoute: "gradio_api/call/\(clean)",
+            body: body,
+            timeout: timeout
+        )
+    }
+
+    private func callRoute(submitRoute: String, resultRoute: String, body: [String: Any], timeout: TimeInterval) async throws -> Any {
         let submitURL = baseURL.appending(path: submitRoute)
         var submit = URLRequest(url: submitURL)
         submit.httpMethod = "POST"
@@ -157,11 +157,10 @@ actor GradioClient {
         authorize(&submit)
         submit.setValue("application/json", forHTTPHeaderField: "Content-Type")
         submit.setValue("application/json", forHTTPHeaderField: "Accept")
-        submit.httpBody = try JSONSerialization.data(withJSONObject: ["data": arguments.map(\.json)])
+        submit.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (submitData, submitResponse) = try await session.data(for: submit)
         try validate(submitData, submitResponse)
-
         guard let object = try JSONSerialization.jsonObject(with: submitData) as? [String: Any], let eventID = object["event_id"] as? String else {
             throw ClientError.noEventID
         }
@@ -183,9 +182,7 @@ actor GradioClient {
         var request = URLRequest(url: url)
         authorize(&request)
         let (temp, response) = try await session.download(for: request)
-        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else {
-            throw ClientError.invalidResponse
-        }
+        guard let http = response as? HTTPURLResponse, 200..<300 ~= http.statusCode else { throw ClientError.invalidResponse }
         let ext = url.pathExtension.isEmpty ? "bin" : url.pathExtension
         let destination = FileManager.default.temporaryDirectory.appending(path: "ObjectStudio-\(UUID().uuidString).\(ext)")
         try? FileManager.default.removeItem(at: destination)
@@ -217,7 +214,6 @@ actor GradioClient {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         var currentEvent = ""
         var completed: Any?
-
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("event:") {
                 currentEvent = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
@@ -238,7 +234,7 @@ actor GradioClient {
         guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
         guard 200..<300 ~= http.statusCode else {
             let text = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-            throw ClientError.server("HTTP \(http.statusCode): \(text.prefix(350))")
+            throw ClientError.server("HTTP \(http.statusCode): \(text.prefix(500))")
         }
     }
 }
