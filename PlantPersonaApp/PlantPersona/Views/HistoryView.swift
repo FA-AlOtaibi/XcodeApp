@@ -1,6 +1,14 @@
 import SwiftUI
 
 struct HistoryView: View {
+    @EnvironmentObject private var app: AppState
+
+    var body: some View {
+        HistoryContent(history: app.history)
+    }
+}
+
+private struct HistoryContent: View {
     @ObservedObject var history: PlantHistoryStore
 
     var body: some View {
