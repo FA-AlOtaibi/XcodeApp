@@ -18,7 +18,7 @@ jobs:
       - name: Decode source archive
         shell: bash
         run: |
-          base64 --decode PlantPersonaSource.zip.b64 > PlantPersonaSource.zip
+          base64 -D -i PlantPersonaSource.zip.b64 -o PlantPersonaSource.zip
           unzip -q PlantPersonaSource.zip
           ls -la PlantPersona
 
