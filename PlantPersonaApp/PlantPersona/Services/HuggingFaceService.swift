@@ -13,14 +13,16 @@ final class HuggingFaceService {
         case server(String)
         case parse(String)
         case noAvailableProvider
+        case providerRefusal(String)
 
         var errorDescription: String? {
             switch self {
             case .missingToken: return "أضف مفتاح Hugging Face من الإعدادات أولًا."
             case .invalidResponse: return "وصل رد غير صالح من خدمة الذكاء الاصطناعي. جرّب مرة أخرى."
             case .server(let message): return message
-            case .parse: return "وصلت نتيجة غير مفهومة من النموذج. جرّب وسائط أوضح."
+            case .parse: return "وصل رد من النموذج لكن تعذر ترتيبه. جرّب مرة أخرى."
             case .noAvailableProvider: return "ما فيه مزوّد متاح للتحليل الآن. تأكد أن مفتاح Hugging Face يسمح باستخدام Inference Providers ثم جرّب مرة أخرى."
+            case .providerRefusal(let reason): return "مزود الذكاء الاصطناعي رفض تحليل هذا المحتوى بسبب سياسته. \(reason)"
             }
         }
     }
@@ -49,8 +51,53 @@ final class HuggingFaceService {
             ["role": "system", "content": systemPrompt],
             ["role": "user", "content": content]
         ]
-        let text = try await performWithFallback(models: visionModels, messages: messages, temperature: 0.10, maxTokens: 1800)
-        return try decodeJSON(VisualAnalysis.self, from: text)
+        let raw = try await performWithFallback(models: visionModels, messages: messages, temperature: 0.10, maxTokens: 1800)
+
+        if isProviderRefusal(raw) {
+            throw HFError.providerRefusal(shortRefusalReason(raw))
+        }
+
+        if let direct = try? decodeJSON(VisualAnalysis.self, from: raw) {
+            return direct
+        }
+
+        // بعض النماذج تعطي شرحًا صحيحًا لكن بصيغة JSON غير مكتملة أو مع نص زائد.
+        // نطلب منها مرة واحدة إعادة تنسيق نفس الرد دون إعادة تحليل الصورة أو إضافة حقائق جديدة.
+        if let repaired = try? await repairToVisualAnalysis(raw) {
+            return repaired
+        }
+
+        // آخر fallback: لا نرمي نتيجة مفيدة فقط لأن الصيغة لم تطابق الـschema.
+        let cleaned = readableFallback(raw)
+        guard !cleaned.isEmpty else { throw HFError.parse(raw) }
+        return VisualAnalysis(
+            title: "نتيجة التحليل",
+            category: "تحليل عام",
+            summary: cleaned,
+            confidence: 45,
+            keyFacts: [],
+            visibleDetails: [],
+            howItWorksOrUsed: [],
+            cautions: [],
+            uncertainty: "الرد وصل كنص غير منظم، لذلك بعض الأقسام التفصيلية غير متاحة في هذه المحاولة.",
+            automotive: nil
+        )
+    }
+
+    private func repairToVisualAnalysis(_ raw: String) async throws -> VisualAnalysis {
+        let repairSystem = """
+        أنت مُنسّق بيانات فقط. لا تستنتج أي معلومة جديدة ولا تغيّر معنى النص.
+        حوّل الرد المرفق إلى JSON صالح فقط بهذا الشكل:
+        {"title":"","category":"","summary":"","confidence":0,"keyFacts":[],"visibleDetails":[],"howItWorksOrUsed":[],"cautions":[],"uncertainty":null,"automotive":null}
+        إذا كانت معلومة غير موجودة استخدم قيمة فارغة مناسبة. confidence رقم صحيح من 0 إلى 100.
+        """
+        let repairMessages: [[String: Any]] = [
+            ["role": "system", "content": repairSystem],
+            ["role": "user", "content": "أعد تنسيق هذا الرد فقط:\n\(String(raw.prefix(7000)))"]
+        ]
+        let repaired = try await performWithFallback(models: visionModels, messages: repairMessages, temperature: 0.0, maxTokens: 1500)
+        if isProviderRefusal(repaired) { throw HFError.providerRefusal(shortRefusalReason(repaired)) }
+        return try decodeJSON(VisualAnalysis.self, from: repaired)
     }
 
     private var systemPrompt: String {
@@ -101,6 +148,7 @@ final class HuggingFaceService {
         for model in models {
             do { return try await perform(model: model, messages: messages, temperature: temperature, maxTokens: maxTokens) }
             catch HFError.server(let message) { lastMessage = message; continue }
+            catch HFError.providerRefusal { throw errorForRefusal(lastMessage) }
             catch { continue }
         }
         if let lastMessage {
@@ -110,6 +158,10 @@ final class HuggingFaceService {
             }
         }
         throw HFError.noAvailableProvider
+    }
+
+    private func errorForRefusal(_ message: String?) -> HFError {
+        HFError.providerRefusal(message.map(shortRefusalReason) ?? "")
     }
 
     private func perform(model: String, messages: [[String: Any]], temperature: Double, maxTokens: Int) async throws -> String {
@@ -126,6 +178,7 @@ final class HuggingFaceService {
         guard (200...299).contains(http.statusCode) else {
             let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let message = (payload?["error"] as? [String: Any])?["message"] as? String ?? payload?["error"] as? String ?? String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            if isProviderRefusal(message) { throw HFError.providerRefusal(shortRefusalReason(message)) }
             throw HFError.server(message)
         }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let choices = root["choices"] as? [[String: Any]], let first = choices.first, let message = first["message"] as? [String: Any] else { throw HFError.invalidResponse }
@@ -138,9 +191,43 @@ final class HuggingFaceService {
     }
 
     private func decodeJSON<T: Decodable>(_ type: T.Type, from raw: String) throws -> T {
-        let cleaned = raw.replacingOccurrences(of: "```json", with: "").replacingOccurrences(of: "```", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = raw
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```JSON", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let data = cleaned.data(using: .utf8), let decoded = try? JSONDecoder().decode(T.self, from: data) {
+            return decoded
+        }
+
         guard let first = cleaned.firstIndex(of: "{"), let last = cleaned.lastIndex(of: "}") else { throw HFError.parse(cleaned) }
-        do { return try JSONDecoder().decode(T.self, from: Data(String(cleaned[first...last]).utf8)) }
+        let candidate = String(cleaned[first...last])
+        do { return try JSONDecoder().decode(T.self, from: Data(candidate.utf8)) }
         catch { throw HFError.parse(error.localizedDescription) }
+    }
+
+    private func readableFallback(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(1800)
+            .description
+    }
+
+    private func isProviderRefusal(_ raw: String) -> Bool {
+        let s = raw.lowercased()
+        let markers = [
+            "cannot assist", "can't assist", "cannot analyze", "can't analyze", "unable to analyze",
+            "policy", "safety policy", "sexual content", "explicit content", "nudity", "nsfw",
+            "لا أستطيع تحليل", "لا يمكنني تحليل", "لا أستطيع المساعدة", "محتوى جنسي", "محتوى صريح", "سياسة المحتوى"
+        ]
+        return markers.contains { s.contains($0) }
+    }
+
+    private func shortRefusalReason(_ raw: String) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty { return "" }
+        return String(text.prefix(220))
     }
 }
