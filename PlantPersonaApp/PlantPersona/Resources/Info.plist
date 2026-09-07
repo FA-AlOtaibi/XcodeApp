@@ -14,10 +14,7 @@
     <key>LSRequiresIPhoneOS</key><true/>
     <key>NSCameraUsageDescription</key><string>نحتاج الكاميرا لتصوير النبتة وتحليل حالتها.</string>
     <key>NSPhotoLibraryUsageDescription</key><string>اختر صورة نبتة من مكتبة الصور لتحليلها.</string>
-    <key>UILaunchScreen</key>
-    <dict>
-        <key>UIColorName</key><string></string>
-    </dict>
+    <key>UILaunchScreen</key><dict/>
     <key>UIRequiresFullScreen</key><true/>
     <key>UISupportedInterfaceOrientations</key>
     <array><string>UIInterfaceOrientationPortrait</string></array>
