@@ -69,9 +69,8 @@ final class AppState: ObservableObject {
     func ask(_ question: String) async {
         guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         isAnalyzing = true; errorMessage = nil; defer { isAnalyzing = false }
-        do {
-            assistantAnswer = try await intelligence.ask(question, context: currentContext())
-        } catch { errorMessage = error.localizedDescription }
+        do { assistantAnswer = try await intelligence.ask(question, context: currentContext()) }
+        catch { errorMessage = error.localizedDescription }
     }
 
     func reviewTechnician(_ statement: String) async {
@@ -103,7 +102,7 @@ final class AppState: ObservableObject {
     private func currentContext() -> String {
         var parts: [String] = []
         if let a = analysis { parts.append("آخر تحليل: \(a.title) — \(a.summary)") }
-        let obdText = obd.contextText(); if !obdText.isEmpty { parts.append("OBD:\n\(obdText)") }
+        if let obdText = obd.contextText(), !obdText.isEmpty { parts.append("OBD:\n\(obdText)") }
         if let soundProfile { parts.append("الصوت: RMS \(soundProfile.rms), Peak \(soundProfile.peak)") }
         return parts.joined(separator: "\n\n")
     }
