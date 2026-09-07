@@ -1,5 +1,25 @@
 import Foundation
 
+private extension KeyedDecodingContainer {
+    func decodePercent(forKey key: Key) -> Int {
+        if let value = try? decode(Int.self, forKey: key) {
+            return max(0, min(100, value))
+        }
+        if let value = try? decode(Double.self, forKey: key) {
+            let normalized = value >= 0 && value <= 1 ? value * 100 : value
+            return max(0, min(100, Int(normalized.rounded())))
+        }
+        if let value = try? decode(String.self, forKey: key) {
+            let cleaned = value.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if let number = Double(cleaned) {
+                let normalized = number >= 0 && number <= 1 ? number * 100 : number
+                return max(0, min(100, Int(normalized.rounded())))
+            }
+        }
+        return 0
+    }
+}
+
 struct VisualAnalysis: Codable, Equatable {
     let title: String
     let category: String
@@ -33,17 +53,18 @@ struct VisualAnalysis: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "تحليل الصورة"
-        category = try c.decodeIfPresent(String.self, forKey: .category) ?? "غير محدد"
-        summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? "تم تحليل المحتوى، لكن بعض التفاصيل لم تصل بصيغة كاملة."
-        confidence = max(0, min(100, try c.decodeIfPresent(Int.self, forKey: .confidence) ?? 50))
-        keyFacts = try c.decodeIfPresent([String].self, forKey: .keyFacts) ?? []
-        visibleDetails = try c.decodeIfPresent([String].self, forKey: .visibleDetails) ?? []
-        howItWorksOrUsed = try c.decodeIfPresent([String].self, forKey: .howItWorksOrUsed) ?? []
-        cautions = try c.decodeIfPresent([String].self, forKey: .cautions) ?? []
-        uncertainty = try c.decodeIfPresent(String.self, forKey: .uncertainty)
-        automotive = try c.decodeIfPresent(AutomotiveDiagnostic.self, forKey: .automotive)
-        geo = try c.decodeIfPresent(GeoEstimate.self, forKey: .geo)
+        title = (try? c.decode(String.self, forKey: .title)) ?? "تحليل الصورة"
+        category = (try? c.decode(String.self, forKey: .category)) ?? "عام"
+        summary = (try? c.decode(String.self, forKey: .summary)) ?? "تم تحليل المحتوى."
+        let parsedConfidence = c.decodePercent(forKey: .confidence)
+        confidence = parsedConfidence == 0 ? 50 : parsedConfidence
+        keyFacts = (try? c.decode([String].self, forKey: .keyFacts)) ?? []
+        visibleDetails = (try? c.decode([String].self, forKey: .visibleDetails)) ?? []
+        howItWorksOrUsed = (try? c.decode([String].self, forKey: .howItWorksOrUsed)) ?? []
+        cautions = (try? c.decode([String].self, forKey: .cautions)) ?? []
+        uncertainty = try? c.decodeIfPresent(String.self, forKey: .uncertainty)
+        automotive = try? c.decodeIfPresent(AutomotiveDiagnostic.self, forKey: .automotive)
+        geo = try? c.decodeIfPresent(GeoEstimate.self, forKey: .geo)
     }
 }
 
@@ -61,14 +82,14 @@ struct GeoEstimate: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        country = try c.decodeIfPresent(String.self, forKey: .country)
-        city = try c.decodeIfPresent(String.self, forKey: .city)
-        area = try c.decodeIfPresent(String.self, forKey: .area)
-        landmark = try c.decodeIfPresent(String.self, forKey: .landmark)
-        confidence = max(0, min(100, try c.decodeIfPresent(Int.self, forKey: .confidence) ?? 0))
-        evidence = try c.decodeIfPresent([String].self, forKey: .evidence) ?? []
-        latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
-        longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
+        country = try? c.decodeIfPresent(String.self, forKey: .country)
+        city = try? c.decodeIfPresent(String.self, forKey: .city)
+        area = try? c.decodeIfPresent(String.self, forKey: .area)
+        landmark = try? c.decodeIfPresent(String.self, forKey: .landmark)
+        confidence = c.decodePercent(forKey: .confidence)
+        evidence = (try? c.decode([String].self, forKey: .evidence)) ?? []
+        latitude = try? c.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try? c.decodeIfPresent(Double.self, forKey: .longitude)
     }
 }
 
@@ -90,16 +111,16 @@ struct AutomotiveDiagnostic: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        isVehicleRelated = try c.decodeIfPresent(Bool.self, forKey: .isVehicleRelated) ?? true
-        probableSystem = try c.decodeIfPresent(String.self, forKey: .probableSystem)
-        severity = try c.decodeIfPresent(String.self, forKey: .severity)
-        canDrive = try c.decodeIfPresent(String.self, forKey: .canDrive)
-        symptoms = try c.decodeIfPresent([String].self, forKey: .symptoms) ?? []
-        likelyCauses = try c.decodeIfPresent([AutomotiveCause].self, forKey: .likelyCauses) ?? []
-        checks = try c.decodeIfPresent([String].self, forKey: .checks) ?? []
-        fixes = try c.decodeIfPresent([String].self, forKey: .fixes) ?? []
-        dtcHints = try c.decodeIfPresent([String].self, forKey: .dtcHints) ?? []
-        mechanicNote = try c.decodeIfPresent(String.self, forKey: .mechanicNote)
+        isVehicleRelated = (try? c.decode(Bool.self, forKey: .isVehicleRelated)) ?? true
+        probableSystem = try? c.decodeIfPresent(String.self, forKey: .probableSystem)
+        severity = try? c.decodeIfPresent(String.self, forKey: .severity)
+        canDrive = try? c.decodeIfPresent(String.self, forKey: .canDrive)
+        symptoms = (try? c.decode([String].self, forKey: .symptoms)) ?? []
+        likelyCauses = (try? c.decode([AutomotiveCause].self, forKey: .likelyCauses)) ?? []
+        checks = (try? c.decode([String].self, forKey: .checks)) ?? []
+        fixes = (try? c.decode([String].self, forKey: .fixes)) ?? []
+        dtcHints = (try? c.decode([String].self, forKey: .dtcHints)) ?? []
+        mechanicNote = try? c.decodeIfPresent(String.self, forKey: .mechanicNote)
     }
 }
 
@@ -112,9 +133,9 @@ struct AutomotiveCause: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        cause = try c.decodeIfPresent(String.self, forKey: .cause) ?? "سبب محتمل"
-        probability = max(0, min(100, try c.decodeIfPresent(Int.self, forKey: .probability) ?? 0))
-        reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning) ?? ""
+        cause = (try? c.decode(String.self, forKey: .cause)) ?? "سبب محتمل"
+        probability = c.decodePercent(forKey: .probability)
+        reasoning = (try? c.decode(String.self, forKey: .reasoning)) ?? ""
     }
 }
 
