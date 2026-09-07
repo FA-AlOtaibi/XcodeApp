@@ -27,7 +27,9 @@ final class PlantHistoryStore: ObservableObject {
     }
 
     func remove(at offsets: IndexSet) {
-        entries.remove(atOffsets: offsets)
+        for index in offsets.sorted(by: >) where entries.indices.contains(index) {
+            entries.remove(at: index)
+        }
         save()
     }
 
