@@ -29,9 +29,12 @@ struct SettingsView: View {
                     if !status.isEmpty { Text(status).font(.footnote) }
                 }
 
-                Section("النماذج") {
-                    LabeledContent("الرؤية", value: "Qwen2.5-VL-3B")
-                    LabeledContent("الشخصية", value: "Qwen2.5-7B")
+                Section("محرك الذكاء الاصطناعي") {
+                    LabeledContent("الرؤية", value: "GLM / DeepSeek Vision")
+                    LabeledContent("الشخصية", value: "Qwen / GLM")
+                    Text("يختار التطبيق مزوّدًا متاحًا تلقائيًا وينتقل إلى مزوّد احتياطي إذا كان الأول غير متاح.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("تنبيه") {
