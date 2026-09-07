@@ -1,22 +1,13 @@
 import Foundation
 
-struct PlantDiagnosis: Codable, Equatable {
-    let plantName: String
-    let scientificName: String?
-    let healthStatus: String
-    let likelyIssue: String
-    let confidence: Int
-    let urgency: String
-    let visualEvidence: [String]
-    let careSteps: [String]
-    let warning: String?
-}
-
-struct PlantPersonaMessage: Codable, Equatable {
-    let mood: String
+struct VisualAnalysis: Codable, Equatable {
     let title: String
-    let message: String
-    let shortAction: String
-    let voiceRate: Float
-    let voicePitch: Float
+    let category: String
+    let summary: String
+    let confidence: Int
+    let keyFacts: [String]
+    let visibleDetails: [String]
+    let howItWorksOrUsed: [String]
+    let cautions: [String]
+    let uncertainty: String?
 }
