@@ -1,51 +1,107 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var token = ""
     @State private var status = ""
+    var embedInNavigation: Bool = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Hugging Face") {
-                    SecureField("hf_...", text: $token)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    Text("يُحفظ المفتاح محليًا داخل Keychain على جهازك ولا يظهر في الواجهة بعد الحفظ.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Button("حفظ المفتاح") {
-                        do {
-                            try KeychainStore.shared.saveToken(token.trimmingCharacters(in: .whitespacesAndNewlines))
-                            token = ""
-                            status = "تم الحفظ ✓"
-                        } catch { status = error.localizedDescription }
-                    }
-                    Button("حذف المفتاح", role: .destructive) {
-                        KeychainStore.shared.deleteToken()
-                        status = "تم حذف المفتاح"
-                    }
-                    if !status.isEmpty { Text(status).font(.footnote) }
-                }
-
-                Section("محرك الذكاء الاصطناعي") {
-                    LabeledContent("الرؤية", value: "GLM / DeepSeek Vision")
-                    LabeledContent("الشخصية", value: "Qwen / GLM")
-                    Text("يختار التطبيق مزوّدًا متاحًا تلقائيًا وينتقل إلى مزوّد احتياطي إذا كان الأول غير متاح.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("تنبيه") {
-                    Text("تشخيص النبات من صورة واحدة تقديري. افحص الري والتربة والإضاءة فعليًا قبل اتخاذ إجراء قوي مثل استخدام مبيد أو التخلص من النبات.")
+        Group {
+            if embedInNavigation {
+                NavigationStack { content.navigationTitle("الإعدادات") }
+            } else {
+                NavigationStack {
+                    content
+                        .navigationTitle("الإعدادات")
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("تم") { dismiss() }
+                            }
+                        }
                 }
             }
-            .navigationTitle("الإعدادات")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("تم") { dismiss() }
+        }
+    }
+
+    private var content: some View {
+        Form {
+            Section("مختبر الصوت") {
+                if app.speech.arabicVoices.isEmpty {
+                    Text("ما لقيت أصوات عربية مثبتة على الجهاز. نزّل صوتًا عربيًا من إعدادات iPhone > تسهيلات الاستخدام > المحتوى المنطوق > الأصوات.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("الصوت", selection: $app.speech.selectedVoiceID) {
+                        Text("أفضل صوت تلقائي").tag("")
+                        ForEach(app.speech.arabicVoices) { voice in
+                            Text("\(voice.name) — \(voice.subtitle)").tag(voice.id)
+                        }
+                    }
                 }
+
+                Picker("الشخصية", selection: $app.speech.style) {
+                    ForEach(PlantSpeechService.Style.allCases) { style in
+                        Label(style.rawValue, systemImage: style.icon).tag(style)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("سرعة القراءة")
+                        Spacer()
+                        Text(String(format: "%.0f%%", app.speech.speed * 100))
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $app.speech.speed, in: 0.82...1.16, step: 0.02)
+                }
+
+                Button {
+                    app.speech.preview()
+                } label: {
+                    Label("جرّب الصوت", systemImage: "speaker.wave.2.fill")
+                }
+
+                Button {
+                    app.speech.stop()
+                } label: {
+                    Label("إيقاف الصوت", systemImage: "stop.fill")
+                }
+            }
+
+            Section("Hugging Face") {
+                SecureField("hf_...", text: $token)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Text("المفتاح يُحفظ داخل Keychain على جهازك فقط.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Button("حفظ المفتاح") {
+                    do {
+                        try KeychainStore.shared.saveToken(token.trimmingCharacters(in: .whitespacesAndNewlines))
+                        token = ""
+                        status = "تم الحفظ ✓"
+                    } catch {
+                        status = error.localizedDescription
+                    }
+                }
+
+                Button("حذف المفتاح", role: .destructive) {
+                    KeychainStore.shared.deleteToken()
+                    status = "تم حذف المفتاح"
+                }
+
+                if !status.isEmpty { Text(status).font(.footnote) }
+            }
+
+            Section("التطبيق") {
+                LabeledContent("الإصدار", value: "1.4")
+                LabeledContent("السجل", value: "آخر 30 تشخيص")
+                Text("التشخيص من صورة واحدة تقديري. استخدم النتيجة كدليل للعناية وليس كتشخيص زراعي قطعي.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
     }
