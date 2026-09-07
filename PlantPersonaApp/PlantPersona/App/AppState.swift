@@ -6,7 +6,7 @@ final class AppState: ObservableObject {
     @Published var isAnalyzing = false
     @Published var errorMessage: String?
     @Published var selectedImageData: Data?
-    @Published var selectedMediaKind: String = "صورة"
+    @Published var selectedMediaKind: String = ""
     @Published var soundProfile: MediaSoundProfile?
     @Published var assistantAnswer: String?
     @Published var guidedStep: String?
@@ -20,91 +20,167 @@ final class AppState: ObservableObject {
     let obd = OBDService()
     private let videoProcessor = VideoMediaProcessor()
 
+    private var requestSerial = 0
+    private var lastQuestion = ""
+    private var lastQuestionAt = Date.distantPast
+
     func reset() {
+        requestSerial += 1
         analysis = nil
         errorMessage = nil
         selectedImageData = nil
-        selectedMediaKind = "صورة"
+        selectedMediaKind = ""
         soundProfile = nil
         assistantAnswer = nil
         guidedStep = nil
         compareResult = nil
+        isAnalyzing = false
     }
 
     func analyze(imageData: Data) async {
-        isAnalyzing = true
-        errorMessage = nil
-        analysis = nil
+        guard !isAnalyzing else { return }
+        let serial = beginRequest()
         selectedMediaKind = "صورة"
         soundProfile = nil
-        defer { isAnalyzing = false }
+        selectedImageData = imageData
+        defer { finishRequest(serial) }
         do {
             let result = try await hf.analyzeImage(imageData: imageData, obdContext: obd.contextText())
+            guard serial == requestSerial else { return }
             analysis = result
+            assistantAnswer = nil
+            guidedStep = nil
             history.add(analysis: result)
             saveToProfile(result)
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            guard serial == requestSerial else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func analyzeVideo(data: Data) async {
-        isAnalyzing = true
-        errorMessage = nil
-        analysis = nil
-        selectedMediaKind = "فيديو + صوت"
-        defer { isAnalyzing = false }
+        guard !isAnalyzing else { return }
+        let serial = beginRequest()
+        selectedMediaKind = "فيديو"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("ayn-\(UUID().uuidString).mov")
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            finishRequest(serial)
+        }
         do {
             try data.write(to: url, options: .atomic)
-            defer { try? FileManager.default.removeItem(at: url) }
             let processed = try await videoProcessor.process(url: url)
+            guard serial == requestSerial else { return }
             selectedImageData = processed.frames.first
             soundProfile = processed.sound
             let result = try await hf.analyzeVideoFrames(processed.frames, sound: processed.sound, obdContext: obd.contextText())
+            guard serial == requestSerial else { return }
             analysis = result
+            assistantAnswer = nil
+            guidedStep = nil
             history.add(analysis: result)
             saveToProfile(result)
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            guard serial == requestSerial else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
-    func ask(_ question: String) async {
-        guard !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        isAnalyzing = true; errorMessage = nil; defer { isAnalyzing = false }
-        do { assistantAnswer = try await intelligence.ask(question, context: currentContext()) }
-        catch { errorMessage = error.localizedDescription }
+    func ask(_ question: String, useCurrentContext: Bool = true) async {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isAnalyzing else { return }
+
+        // يمنع الضغط المكرر من إرسال نفس السؤال مرتين خلال ثوانٍ.
+        if trimmed == lastQuestion && Date().timeIntervalSince(lastQuestionAt) < 4 { return }
+        lastQuestion = trimmed
+        lastQuestionAt = Date()
+
+        let serial = beginRequest(clearAnalysis: false)
+        defer { finishRequest(serial) }
+        do {
+            let context = useCurrentContext ? currentContext() : nil
+            let answer = try await intelligence.ask(trimmed, context: context)
+            guard serial == requestSerial else { return }
+            assistantAnswer = answer
+        } catch {
+            guard serial == requestSerial else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func reviewTechnician(_ statement: String) async {
-        isAnalyzing = true; errorMessage = nil; defer { isAnalyzing = false }
-        do { assistantAnswer = try await intelligence.reviewTechnician(statement: statement, analysis: analysis, obd: obd.contextText()) }
-        catch { errorMessage = error.localizedDescription }
+        let trimmed = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isAnalyzing else { return }
+        let serial = beginRequest(clearAnalysis: false)
+        defer { finishRequest(serial) }
+        do {
+            let answer = try await intelligence.reviewTechnician(statement: trimmed, analysis: analysis, obd: obd.contextText())
+            guard serial == requestSerial else { return }
+            assistantAnswer = answer
+        } catch {
+            guard serial == requestSerial else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func nextGuidedStep(mode: String) async {
-        isAnalyzing = true; errorMessage = nil; defer { isAnalyzing = false }
-        do { guidedStep = try await intelligence.guidedNextStep(current: analysis, mode: mode) }
-        catch { errorMessage = error.localizedDescription }
+        // لا نسأل المستخدم عن صور إضافية قبل وجود تحليل فعلي.
+        guard analysis != nil, !isAnalyzing else { return }
+        let serial = beginRequest(clearAnalysis: false)
+        defer { finishRequest(serial) }
+        do {
+            let step = try await intelligence.guidedNextStep(current: analysis, mode: mode)
+            guard serial == requestSerial else { return }
+            guidedStep = step
+        } catch {
+            guard serial == requestSerial else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func compare(images: [Data], prompt: String) async {
-        isAnalyzing = true; errorMessage = nil; compareResult = nil; defer { isAnalyzing = false }
-        do { compareResult = try await intelligence.compare(images: images, prompt: prompt) }
-        catch { errorMessage = error.localizedDescription }
+        guard images.count >= 2, !isAnalyzing else { return }
+        let serial = beginRequest(clearAnalysis: false)
+        compareResult = nil
+        defer { finishRequest(serial) }
+        do {
+            let result = try await intelligence.compare(images: images, prompt: prompt)
+            guard serial == requestSerial else { return }
+            compareResult = result
+        } catch {
+            guard serial == requestSerial else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 
     func reanalyzeWithOBD() async {
-        guard let image = selectedImageData else {
-            errorMessage = "صوّر أو اختر وسائط أولًا ثم أعد التحليل بعد فحص OBD."
-            return
-        }
+        guard let image = selectedImageData, !isAnalyzing else { return }
         await analyze(imageData: image)
     }
 
-    private func currentContext() -> String {
+    private func beginRequest(clearAnalysis: Bool = true) -> Int {
+        requestSerial += 1
+        isAnalyzing = true
+        errorMessage = nil
+        if clearAnalysis { analysis = nil }
+        return requestSerial
+    }
+
+    private func finishRequest(_ serial: Int) {
+        if serial == requestSerial { isAnalyzing = false }
+    }
+
+    private func currentContext() -> String? {
         var parts: [String] = []
-        if let a = analysis { parts.append("آخر تحليل: \(a.title) — \(a.summary)") }
+        if let a = analysis { parts.append("الصورة الحالية: \(a.title). \(a.summary)") }
+        if let geo = analysis?.geo {
+            let place = [geo.area, geo.city, geo.country].compactMap { $0 }.joined(separator: "، ")
+            if !place.isEmpty { parts.append("تقدير المكان: \(place) (ثقة \(geo.confidence)%)") }
+        }
         if let obdText = obd.contextText(), !obdText.isEmpty { parts.append("OBD:\n\(obdText)") }
-        if let soundProfile { parts.append("الصوت: RMS \(soundProfile.rms), Peak \(soundProfile.peak)") }
-        return parts.joined(separator: "\n\n")
+        if let soundProfile { parts.append("مؤشرات صوت الفيديو: RMS \(soundProfile.rms), Peak \(soundProfile.peak)") }
+        let result = parts.joined(separator: "\n\n")
+        return result.isEmpty ? nil : result
     }
 
     private func saveToProfile(_ result: VisualAnalysis) {
