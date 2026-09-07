@@ -8,46 +8,68 @@ final class AYNIntelligenceService {
         case missingToken, invalidResponse, unavailable
         var errorDescription: String? {
             switch self {
-            case .missingToken: return "أضف مفتاح Hugging Face من الإعدادات أولًا."
-            case .invalidResponse: return "تعذر قراءة رد الذكاء الاصطناعي."
-            case .unavailable: return "تعذر الوصول إلى نموذج مناسب الآن."
+            case .missingToken: return "أضف مفتاح Hugging Face من الإعدادات."
+            case .invalidResponse: return "تعذر قراءة الرد."
+            case .unavailable: return "الخدمة غير متاحة الآن."
             }
         }
     }
 
     func ask(_ question: String, context: String? = nil) async throws -> String {
         var user = question
-        if let context, !context.isEmpty { user += "\n\nالسياق الحالي من عَيْن:\n\(context)" }
-        return try await chat(system: "أنت عَيْن، مساعد بصري وتقني عملي. أجب بالعربية السهلة، اختصر الهبد، ميّز بين المؤكد والمحتمل، وابدأ بخطوات الفحص الأبسط قبل اقتراح تغيير قطع أو شراء شيء.", user: user)
+        if let context, !context.isEmpty {
+            user += "\n\nسياق اختياري من آخر تحليل، استخدمه فقط إذا كان مرتبطًا بالسؤال:\n\(context)"
+        }
+        return try await chat(
+            system: """
+            أنت عَيْن، مساعد عام وعملي. يحق للمستخدم أن يسألك أي سؤال عادي حتى بدون صورة.
+            أجب مباشرة بالعربية السهلة. لا تبدأ بطلب صورة أو أسئلة توضيحية إلا إذا كانت ضرورية جدًا للإجابة.
+            لا تكرر الفكرة نفسها بصيغ مختلفة. اجعل الرد مختصرًا افتراضيًا، وميّز بوضوح بين المعلومة المؤكدة والتخمين.
+            إذا كان السؤال عن سيارة، ابدأ بالفحص الأبسط والأقل تكلفة قبل اقتراح تغيير قطع.
+            """,
+            user: user,
+            maxTokens: 850
+        )
     }
 
     func compare(images: [Data], prompt: String) async throws -> String {
-        guard !images.isEmpty else { return "أضف صورًا للمقارنة أولًا." }
-        var content: [[String: Any]] = [["type":"text","text":prompt + "\nقارن بدقة بين الصور بالترتيب. اذكر ما تغير، ما بقي ثابتًا، ومدى ثقتك. لا تخترع تغيرات غير ظاهرة."]]
+        guard images.count >= 2 else { return "اختر صورتين على الأقل." }
+        var content: [[String: Any]] = [[
+            "type":"text",
+            "text":prompt + "\nاكتب: الخلاصة، التغيرات المهمة فقط، وما يحتاج متابعة. لا تكرر ولا تخترع اختلافات غير ظاهرة."
+        ]]
         for image in images.prefix(6) {
             content.append(["type":"image_url","image_url":["url":"data:image/jpeg;base64,\(image.base64EncodedString())"]])
         }
-        let messages: [[String: Any]] = [
-            ["role":"system","content":"أنت محلل مقارنة بصري. اكتب بالعربية بنقاط واضحة مع: الخلاصة، التغيرات، الأشياء الثابتة، ما يحتاج متابعة."],
+        return try await perform(messages: [
+            ["role":"system","content":"أنت محلل مقارنة بصري دقيق ومختصر."],
             ["role":"user","content":content]
-        ]
-        return try await perform(messages: messages, maxTokens: 1400)
+        ], maxTokens: 900)
     }
 
     func reviewTechnician(statement: String, analysis: VisualAnalysis?, obd: String?) async throws -> String {
         var context = "كلام الفني: \(statement)"
-        if let analysis { context += "\nتحليل عَيْن السابق: \(analysis.title) — \(analysis.summary)" }
-        if let obd, !obd.isEmpty { context += "\nبيانات OBD:\n\(obd)" }
-        return try await chat(system: "راجع كلام الفني كخبير صيانة محافظ. لا تقل إن الفني مخطئ بلا دليل. اذكر: ما المنطقي، ما يحتاج إثبات، الاختبارات التي يجب طلبها قبل تغيير القطع، وما هي العلامات التي تجعل الإصلاح عاجلًا.", user: context)
+        if let analysis { context += "\nتحليل سابق: \(analysis.title) — \(analysis.summary)" }
+        if let obd, !obd.isEmpty { context += "\nOBD:\n\(obd)" }
+        return try await chat(
+            system: "راجع كلام الفني بحياد واختصار. أعط: هل الكلام منطقي، ما الذي يحتاج إثبات، وما الاختبار الذي يسبق تغيير القطعة. لا تتهم الفني ولا تكرر الكلام.",
+            user: context,
+            maxTokens: 750
+        )
     }
 
     func guidedNextStep(current: VisualAnalysis?, mode: String) async throws -> String {
-        let context = current.map { "العنصر: \($0.title)\nالملخص: \($0.summary)\nعدم اليقين: \($0.uncertainty ?? "لا يوجد")" } ?? "لا توجد نتيجة سابقة."
-        return try await chat(system: "أنت مساعد فحص بصري تفاعلي. أعط المستخدم خطوة تصوير واحدة فقط تساعد أكثر في تأكيد التشخيص. اجعلها قصيرة جدًا وآمنة.", user: "الوضع: \(mode)\n\(context)")
+        guard let current else { return "" }
+        let context = "العنصر: \(current.title)\nالملخص: \(current.summary)\nعدم اليقين: \(current.uncertainty ?? "لا يوجد")"
+        return try await chat(
+            system: "أعط خطوة تصوير واحدة فقط تساعد في زيادة دقة الفحص. جملة قصيرة، بدون مقدمة وبدون أكثر من سؤال واحد.",
+            user: "الوضع: \(mode)\n\(context)",
+            maxTokens: 180
+        )
     }
 
-    private func chat(system: String, user: String) async throws -> String {
-        try await perform(messages: [["role":"system","content":system],["role":"user","content":user]], maxTokens: 1300)
+    private func chat(system: String, user: String, maxTokens: Int) async throws -> String {
+        try await perform(messages: [["role":"system","content":system],["role":"user","content":user]], maxTokens: maxTokens)
     }
 
     private func perform(messages: [[String: Any]], maxTokens: Int) async throws -> String {
@@ -56,16 +78,25 @@ final class AYNIntelligenceService {
             do {
                 var request = URLRequest(url: endpoint)
                 request.httpMethod = "POST"
-                request.timeoutInterval = 120
+                request.timeoutInterval = 60
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.httpBody = try JSONSerialization.data(withJSONObject: ["model":model,"messages":messages,"temperature":0.15,"max_tokens":maxTokens])
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "model":model,
+                    "messages":messages,
+                    "temperature":0.12,
+                    "max_tokens":maxTokens
+                ])
                 let (data, response) = try await URLSession.shared.data(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { continue }
-                guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let choices = root["choices"] as? [[String: Any]], let first = choices.first, let message = first["message"] as? [String: Any] else { continue }
-                if let text = message["content"] as? String, !text.isEmpty { return text }
+                guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let choices = root["choices"] as? [[String: Any]],
+                      let message = choices.first?["message"] as? [String: Any] else { continue }
+                if let text = message["content"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return text.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
                 if let parts = message["content"] as? [[String: Any]] {
-                    let text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                    let text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
                     if !text.isEmpty { return text }
                 }
             } catch { continue }
