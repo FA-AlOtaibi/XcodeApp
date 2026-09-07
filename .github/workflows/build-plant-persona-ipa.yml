@@ -4,7 +4,7 @@ on:
   push:
     branches: [plant-persona]
     paths:
-      - 'PlantPersonaSource.zip.b64'
+      - 'PlantPersonaApp/**'
       - '.github/workflows/build-plant-persona-ipa.yml'
   workflow_dispatch:
 
@@ -15,23 +15,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Decode source archive
+      - name: Prepare project
         shell: bash
         run: |
-          base64 -D -i PlantPersonaSource.zip.b64 -o PlantPersonaSource.zip
-          unzip -q PlantPersonaSource.zip
-          ls -la PlantPersona
-
-      - name: Show Xcode version
-        run: xcodebuild -version
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          cd PlantPersonaApp
+          xcodegen generate
+          xcodebuild -list -project PlantPersona.xcodeproj
 
       - name: Build unsigned iPhone app
         shell: bash
         run: |
           set -o pipefail
-          rm -rf DerivedData build.log Payload PlantPersona-Unsigned.ipa
+          cd PlantPersonaApp
+          rm -rf DerivedData build.log Payload PlantPersona-Unsigned.ipa PlantPersona-Unsigned.ipa.sha256
           xcodebuild \
-            -project 'PlantPersona/PlantPersona.xcodeproj' \
+            -project PlantPersona.xcodeproj \
             -target PlantPersona \
             -configuration Release \
             -sdk iphoneos \
@@ -45,6 +46,7 @@ jobs:
       - name: Package IPA
         shell: bash
         run: |
+          cd PlantPersonaApp
           APP_PATH=$(find DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name 'PlantPersona.app' -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo 'PlantPersona.app not found'
@@ -62,8 +64,8 @@ jobs:
         with:
           name: PlantPersona-Unsigned-IPA
           path: |
-            PlantPersona-Unsigned.ipa
-            PlantPersona-Unsigned.ipa.sha256
-            build.log
+            PlantPersonaApp/PlantPersona-Unsigned.ipa
+            PlantPersonaApp/PlantPersona-Unsigned.ipa.sha256
+            PlantPersonaApp/build.log
           if-no-files-found: error
           retention-days: 30
