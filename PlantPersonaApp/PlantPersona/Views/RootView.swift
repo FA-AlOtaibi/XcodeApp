@@ -10,31 +10,27 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.black, Color(red: 0.04, green: 0.09, blue: 0.07)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 22) {
-                    header
-                    scannerCard
-                    if isLoadingPhoto { loadingPhotoCard }
-                    if app.isAnalyzing { analyzingCard }
-                    if let diagnosis = app.diagnosis { diagnosisCard(diagnosis) }
-                    if let persona = app.persona { personaCard(persona) }
-                    if let error = app.errorMessage { errorCard(error) }
+                VStack(spacing: 0) {
+                    hero
+
+                    VStack(spacing: 16) {
+                        if isLoadingPhoto { statusCard("جاري تجهيز الصورة…", icon: "photo.badge.clock") }
+                        if app.isAnalyzing { statusCard("جاري تحليل النبتة…", icon: "waveform.path.ecg") }
+                        if let diagnosis = app.diagnosis { diagnosisCard(diagnosis) }
+                        if let persona = app.persona { personaCard(persona) }
+                        if let error = app.errorMessage { errorCard(error) }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 18)
+                    .padding(.bottom, 38)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
-                .padding(.bottom, 40)
             }
             .scrollIndicators(.hidden)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker(onImage: handleImage)
                 .ignoresSafeArea()
@@ -48,220 +44,236 @@ struct RootView: View {
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("PLANT PERSONA")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .tracking(2.2)
-                    .foregroundStyle(.green.opacity(0.8))
-                Text("وش تقول نبتتك؟")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .minimumScaleFactor(0.82)
-            }
-            Spacer(minLength: 8)
-            Button { app.showSettings = true } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.title3)
-                    .frame(width: 48, height: 48)
-                    .background(.thinMaterial, in: Circle())
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 12)
-    }
-
-    private var scannerCard: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 28)
-                    .fill(Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 28)
-                            .stroke(Color.green.opacity(0.22), lineWidth: 1)
-                    )
-
-                if let data = app.selectedImageData, let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
+    private var hero: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                if let data = app.selectedImageData, let image = UIImage(data: data) {
+                    Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 28))
-                        .overlay(alignment: .topLeading) {
-                            Text("BIO-SCAN")
-                                .font(.caption2.monospaced().bold())
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(.black.opacity(0.55), in: Capsule())
-                                .padding(14)
-                        }
                 } else {
-                    VStack(spacing: 14) {
-                        Image(systemName: "leaf.circle.fill")
-                            .font(.system(size: 76))
-                            .foregroundStyle(.green)
-                            .symbolRenderingMode(.hierarchical)
-                        Text("وجّه الكاميرا لأوراق النبتة")
-                            .font(.title3.bold())
-                        Text("صورة واضحة، ضوء جيد، وخلي الورقة المصابة ظاهرة")
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 25)
+                    LinearGradient(
+                        colors: [Color(red: 0.02, green: 0.17, blue: 0.09), .black],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    .overlay {
+                        Image(systemName: "leaf.fill")
+                            .font(.system(size: 130, weight: .semibold))
+                            .foregroundStyle(.green.opacity(0.22))
                     }
                 }
             }
             .frame(maxWidth: .infinity)
-            .aspectRatio(1.06, contentMode: .fit)
-            .frame(minHeight: 300, maxHeight: 430)
+            .frame(height: 500)
+            .clipped()
 
-            HStack(spacing: 12) {
-                actionButton(title: "صوّر النبتة", icon: "camera.fill", primary: true) {
-                    showCamera = true
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.18), .black.opacity(0.96)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 500)
+
+            VStack(spacing: 18) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("PLANT PERSONA")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .tracking(2.3)
+                            .foregroundStyle(.green)
+                        Text(app.selectedImageData == nil ? "خلّ نبتتك تتكلم" : "الصورة جاهزة للتحليل")
+                            .font(.system(size: 31, weight: .bold, design: .rounded))
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button { app.showSettings = true } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 19, weight: .semibold))
+                            .frame(width: 48, height: 48)
+                            .background(.black.opacity(0.5), in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
                 }
 
-                PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                    Label("من الصور", systemImage: "photo.on.rectangle")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
+                Text("صوّر الورقة أو اختر صورة، والتطبيق يحلل نوع النبتة وحالتها ثم يحوّل النتيجة إلى رسالة بصوت وشخصية.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 12) {
+                    Button {
+                        showCamera = true
+                    } label: {
+                        Label("صوّر النبتة", systemImage: "camera.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 58)
+                            .background(.green, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .foregroundStyle(.black)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoadingPhoto || app.isAnalyzing)
+
+                    PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                        Label("من الصور", systemImage: "photo.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 58)
+                            .background(.white.opacity(0.11), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoadingPhoto || app.isAnalyzing)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.white.opacity(0.12))
-                .disabled(isLoadingPhoto || app.isAnalyzing)
             }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 22)
         }
         .frame(maxWidth: .infinity)
+        .background(Color.black)
     }
 
-    private var loadingPhotoCard: some View {
+    private func statusCard(_ title: String, icon: String) -> some View {
         HStack(spacing: 14) {
             ProgressView().tint(.green)
-            Text("قاعد أجهز الصورة…").bold()
+            Label(title, systemImage: icon)
+                .font(.headline)
             Spacer()
         }
         .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
-    }
-
-    private var analyzingCard: some View {
-        HStack(spacing: 14) {
-            ProgressView().tint(.green)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("قاعد أسمع شكوى النبتة…").bold()
-                Text("تحليل الصورة ثم تحويل التشخيص إلى شخصية")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(18)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private func diagnosisCard(_ d: PlantDiagnosis) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(d.plantName).font(.title2.bold())
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("التشخيص")
+                        .font(.caption.bold())
+                        .foregroundStyle(.green)
+                    Text(d.plantName)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
                     if let scientific = d.scientificName {
-                        Text(scientific).italic().foregroundStyle(.secondary)
+                        Text(scientific)
+                            .italic()
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
                 Text("\(d.confidence)%")
-                    .font(.headline.monospacedDigit())
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Color.green.opacity(0.14), in: Capsule())
+                    .font(.title3.bold().monospacedDigit())
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(.green.opacity(0.14), in: Capsule())
             }
 
-            Divider().overlay(Color.white.opacity(0.08))
-            Label(d.likelyIssue, systemImage: "stethoscope")
-                .font(.headline)
-            Text(d.healthStatus).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(d.likelyIssue).font(.title3.bold())
+                Text(d.healthStatus).foregroundStyle(.secondary)
+            }
 
             if !d.visualEvidence.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("وش شاف الذكاء الاصطناعي").font(.subheadline.bold())
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("العلامات الظاهرة").font(.headline)
                     ForEach(d.visualEvidence, id: \.self) { item in
-                        Label(item, systemImage: "viewfinder")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "viewfinder.circle.fill").foregroundStyle(.green)
+                            Text(item).foregroundStyle(.white.opacity(0.78))
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
             }
 
             if !d.careSteps.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("الخطة الآن").font(.subheadline.bold())
-                    ForEach(Array(d.careSteps.enumerated()), id: \.offset) { index, item in
-                        Text("\(index + 1). \(item)").font(.subheadline)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("وش تسوي الآن؟").font(.headline)
+                    ForEach(Array(d.careSteps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.caption.bold())
+                                .frame(width: 26, height: 26)
+                                .background(.green.opacity(0.16), in: Circle())
+                                .foregroundStyle(.green)
+                            Text(step)
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 24))
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.08)))
     }
 
     private func personaCard(_ p: PlantPersonaMessage) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
                 Label(p.mood, systemImage: "waveform")
                     .font(.caption.bold())
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.green.opacity(0.14), in: Capsule())
+                    .foregroundStyle(.green)
                 Spacer()
-                Text("VOICE LOG 01")
-                    .font(.caption2.monospaced())
+                Text("صوت النبتة")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(p.title).font(.title2.bold())
+
+            Text(p.title)
+                .font(.system(size: 27, weight: .bold, design: .rounded))
+
             Text("“\(p.message)”")
-                .font(.system(size: 21, weight: .medium, design: .rounded))
-                .lineSpacing(6)
+                .font(.system(size: 22, weight: .medium, design: .rounded))
+                .lineSpacing(7)
+
             Label(p.shortAction, systemImage: "bolt.heart.fill")
-                .font(.subheadline.bold())
+                .font(.headline)
                 .foregroundStyle(.green)
 
             HStack(spacing: 12) {
                 Button {
                     app.speech.speak(p)
                 } label: {
-                    Label("اسمع نبتتك", systemImage: "speaker.wave.2.fill")
+                    Label("اسمعها", systemImage: "speaker.wave.2.fill")
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
+                        .frame(height: 56)
+                        .background(.green, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .foregroundStyle(.black)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
+                .buttonStyle(.plain)
 
                 Button { app.speech.stop() } label: {
                     Image(systemName: "stop.fill")
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 5)
+                        .font(.headline)
+                        .frame(width: 56, height: 56)
+                        .background(.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(Color.green.opacity(0.22), lineWidth: 1)
+        .background(
+            LinearGradient(colors: [.green.opacity(0.12), .white.opacity(0.045)], startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 26, style: .continuous)
         )
+        .overlay(RoundedRectangle(cornerRadius: 26).stroke(.green.opacity(0.18)))
     }
 
     private func errorCard(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("ما قدرت أسمع النبتة", systemImage: "exclamationmark.triangle.fill")
+        VStack(alignment: .leading, spacing: 12) {
+            Label("تعذر إكمال التحليل", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
-            Text(message).foregroundStyle(.secondary)
-            if message.contains("مفتاح Hugging Face") {
+                .foregroundStyle(.red)
+            Text(message)
+                .foregroundStyle(.white.opacity(0.72))
+                .textSelection(.enabled)
+            if message.contains("مفتاح Hugging Face") || message.contains("Inference Providers") {
                 Button("فتح الإعدادات") { app.showSettings = true }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
@@ -269,24 +281,7 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
-    }
-
-    private func actionButton(
-        title: String,
-        icon: String,
-        primary: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(primary ? .green : Color.white.opacity(0.12))
-        .disabled(isLoadingPhoto || app.isAnalyzing)
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     @MainActor
