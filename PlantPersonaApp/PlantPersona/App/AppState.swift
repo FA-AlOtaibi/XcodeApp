@@ -37,6 +37,13 @@ final class AppState: ObservableObject {
         isAnalyzing = false
     }
 
+    func clearTransientResults() {
+        assistantAnswer = nil
+        guidedStep = nil
+        compareResult = nil
+        errorMessage = nil
+    }
+
     func analyze(imageData: Data) async {
         guard !isAnalyzing else { return }
         let serial = beginRequest()
@@ -88,10 +95,9 @@ final class AppState: ObservableObject {
 
     func ask(_ question: String, useCurrentContext: Bool = true) async {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isAnalyzing else { return }
-
-        // يمنع الضغط المكرر من إرسال نفس السؤال مرتين خلال ثوانٍ.
-        if trimmed == lastQuestion && Date().timeIntervalSince(lastQuestionAt) < 4 { return }
+        guard !trimmed.isEmpty else { return }
+        guard !isAnalyzing else { return }
+        if trimmed == lastQuestion && Date().timeIntervalSince(lastQuestionAt) < 3 { return }
         lastQuestion = trimmed
         lastQuestionAt = Date()
 
@@ -124,7 +130,6 @@ final class AppState: ObservableObject {
     }
 
     func nextGuidedStep(mode: String) async {
-        // لا نسأل المستخدم عن صور إضافية قبل وجود تحليل فعلي.
         guard analysis != nil, !isAnalyzing else { return }
         let serial = beginRequest(clearAnalysis: false)
         defer { finishRequest(serial) }
@@ -167,7 +172,8 @@ final class AppState: ObservableObject {
     }
 
     private func finishRequest(_ serial: Int) {
-        if serial == requestSerial { isAnalyzing = false }
+        // Requests are intentionally serialized. Always release UI interaction on completion.
+        isAnalyzing = false
     }
 
     private func currentContext() -> String? {
