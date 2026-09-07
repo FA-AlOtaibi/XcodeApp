@@ -23,7 +23,7 @@ struct RootView: View {
                 .tabItem { Label("الإعدادات", systemImage: "slider.horizontal.3") }
                 .tag(2)
         }
-        .tint(.green)
+        .tint(.cyan)
         .fullScreenCover(isPresented: $showCamera) {
             CameraPicker(onImage: handleImage)
                 .ignoresSafeArea()
@@ -36,285 +36,249 @@ struct RootView: View {
 
     private var studio: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    topIdentity
-                    scanStage
-                    quickActions
-
-                    if isLoadingPhoto { activityCard("جاري تجهيز الصورة", detail: "نقرأ الصورة قبل التحليل") }
-                    if app.isAnalyzing { activityCard("النبتة تتكلم الآن…", detail: "تحليل بصري + صياغة شخصية") }
-                    if let diagnosis = app.diagnosis { healthDashboard(diagnosis) }
-                    if let persona = app.persona { voiceCard(persona) }
-                    if let error = app.errorMessage { errorCard(error) }
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-                .padding(.bottom, 34)
-            }
-            .background(
+            ZStack {
                 LinearGradient(
-                    colors: [Color(red: 0.015, green: 0.045, blue: 0.03), .black],
+                    colors: [Color.black, Color(red: 0.025, green: 0.045, blue: 0.07)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
                 .ignoresSafeArea()
-            )
-            .navigationBarHidden(true)
+
+                ScrollView {
+                    VStack(spacing: 18) {
+                        brandHeader
+                        scanner
+                        if isLoadingPhoto { statusCard("جاري تجهيز الصورة…") }
+                        if app.isAnalyzing { statusCard("جاري فهم الصورة…") }
+                        if let analysis = app.analysis { analysisCard(analysis) }
+                        if let error = app.errorMessage { errorCard(error) }
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+                    .padding(.bottom, 34)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
-    private var topIdentity: some View {
-        HStack(spacing: 14) {
+    private var brandHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
             ZStack {
-                Circle().fill(.green.opacity(0.14))
-                Image(systemName: "leaf.fill")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(.green)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.cyan.opacity(0.16))
+                    .frame(width: 58, height: 58)
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 25, weight: .bold))
+                    .foregroundStyle(.cyan)
             }
-            .frame(width: 52, height: 52)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Plant Persona")
-                    .font(.system(size: 27, weight: .bold, design: .rounded))
-                Text("مختبر شخصيات النباتات")
+            VStack(alignment: .leading, spacing: 3) {
+                Text("عَيْن")
+                    .font(.system(size: 32, weight: .black, design: .rounded))
+                Text("صوّر أي شيء، وافهمه")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let d = app.diagnosis {
-                Text(d.urgency.uppercased())
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(.green.opacity(0.12), in: Capsule())
-                    .foregroundStyle(.green)
-            }
+            Text("AI VISION")
+                .font(.caption2.monospaced().bold())
+                .foregroundStyle(.cyan)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.cyan.opacity(0.10), in: Capsule())
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private var scanStage: some View {
-        ZStack(alignment: .bottomLeading) {
-            Group {
-                if let data = app.selectedImageData, let image = UIImage(data: data) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    LinearGradient(
-                        colors: [Color.green.opacity(0.2), Color.white.opacity(0.03)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .overlay {
-                        VStack(spacing: 14) {
-                            Image(systemName: "viewfinder.circle.fill")
-                                .font(.system(size: 78))
-                                .foregroundStyle(.green)
-                            Text("صوّر ورقة النبتة")
-                                .font(.title2.bold())
-                            Text("خلي المشكلة واضحة، والإضاءة طبيعية قدر الإمكان")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
+    private var scanner: some View {
+        VStack(spacing: 14) {
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    if let data = app.selectedImageData, let image = UIImage(data: data) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.08), Color.cyan.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .overlay {
+                            VStack(spacing: 14) {
+                                Image(systemName: "viewfinder.circle.fill")
+                                    .font(.system(size: 86))
+                                    .foregroundStyle(.cyan.opacity(0.8))
+                                Text("وش تبي تعرف عنه؟")
+                                    .font(.title2.bold())
+                                Text("جهاز، سيارة، أداة، طعام، نبات، مبنى… أي شيء قدامك")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 28)
+                            }
                         }
-                        .padding(24)
                     }
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 390)
-            .clipped()
+                .frame(maxWidth: .infinity)
+                .frame(height: 430)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
 
-            LinearGradient(colors: [.clear, .black.opacity(0.78)], startPoint: .center, endPoint: .bottom)
-
-            HStack {
-                Label(app.selectedImageData == nil ? "جاهز للمسح" : "الصورة جاهزة", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.caption.bold())
-                    .foregroundStyle(.white)
-                Spacer()
-                if app.selectedImageData != nil {
-                    Button("مسح") { app.reset() }
-                        .font(.caption.bold())
-                        .foregroundStyle(.white)
+                HStack {
+                    Label(app.selectedImageData == nil ? "جاهز للمسح" : "الصورة جاهزة", systemImage: "dot.radiowaves.left.and.right")
+                    Spacer()
+                    if app.selectedImageData != nil {
+                        Button("مسح") { app.reset() }
+                            .buttonStyle(.plain)
+                    }
                 }
+                .font(.caption.bold())
+                .padding(16)
+                .background(.ultraThinMaterial)
+                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 30, bottomTrailingRadius: 30))
             }
-            .padding(16)
+
+            HStack(spacing: 12) {
+                Button {
+                    showCamera = true
+                } label: {
+                    Label("الكاميرا", systemImage: "camera.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(.cyan, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                        .foregroundStyle(.black)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingPhoto || app.isAnalyzing)
+
+                PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                    Label("الصور", systemImage: "photo.on.rectangle.angled")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 19).stroke(.white.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoadingPhoto || app.isAnalyzing)
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 30).stroke(.white.opacity(0.08)))
-        .shadow(color: .green.opacity(0.08), radius: 30, y: 12)
     }
 
-    private var quickActions: some View {
-        HStack(spacing: 12) {
-            Button {
-                showCamera = true
-            } label: {
-                Label("الكاميرا", systemImage: "camera.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 58)
-                    .background(.green, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .foregroundStyle(.black)
-            }
-            .buttonStyle(.plain)
-
-            PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                Label("الصور", systemImage: "photo.stack.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 58)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.08)))
-            }
-            .buttonStyle(.plain)
-        }
-        .disabled(app.isAnalyzing || isLoadingPhoto)
-    }
-
-    private func activityCard(_ title: String, detail: String) -> some View {
+    private func statusCard(_ text: String) -> some View {
         HStack(spacing: 14) {
-            ProgressView().tint(.green)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+            ProgressView().tint(.cyan)
+            Text(text).font(.headline)
             Spacer()
         }
         .padding(18)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
-    private func healthDashboard(_ d: PlantDiagnosis) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+    private func analysisCard(_ a: VisualAnalysis) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("نتيجة الفحص")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(a.category.uppercased())
                         .font(.caption.bold())
-                        .foregroundStyle(.green)
-                    Text(d.plantName)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                    if let scientific = d.scientificName {
-                        Text(scientific).italic().foregroundStyle(.secondary)
-                    }
+                        .foregroundStyle(.cyan)
+                    Text(a.title)
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                    Text(a.summary)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineSpacing(4)
                 }
-                Spacer()
-                ZStack {
-                    Circle().stroke(.white.opacity(0.08), lineWidth: 7)
-                    Circle()
-                        .trim(from: 0, to: CGFloat(max(0, min(100, d.confidence))) / 100)
-                        .stroke(.green, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Text("\(d.confidence)%").font(.caption.bold().monospacedDigit())
-                }
-                .frame(width: 66, height: 66)
+                Spacer(minLength: 14)
+                confidenceBadge(a.confidence)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(d.likelyIssue).font(.title3.bold())
-                Text(d.healthStatus).foregroundStyle(.secondary)
+            section(title: "أهم المعلومات", icon: "sparkles", items: a.keyFacts)
+            section(title: "وش ظاهر بالصورة", icon: "eye", items: a.visibleDetails)
+            section(title: "الاستخدام أو طريقة العمل", icon: "gearshape.2", items: a.howItWorksOrUsed)
+
+            if !a.cautions.isEmpty {
+                section(title: "تنبيهات", icon: "exclamationmark.triangle", items: a.cautions, warning: true)
             }
 
-            if !d.careSteps.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("خطة الإنقاذ").font(.headline)
-                    ForEach(Array(d.careSteps.prefix(4).enumerated()), id: \.offset) { index, step in
-                        HStack(alignment: .top, spacing: 12) {
-                            Text("\(index + 1)")
-                                .font(.caption.bold())
-                                .frame(width: 26, height: 26)
-                                .background(.green.opacity(0.15), in: Circle())
-                                .foregroundStyle(.green)
-                            Text(step).font(.subheadline)
+            if let uncertainty = a.uncertainty, !uncertainty.isEmpty {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "questionmark.circle.fill").foregroundStyle(.orange)
+                    Text(uncertainty).font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+            }
+
+            ShareLink(item: shareText(a)) {
+                Label("مشاركة النتيجة", systemImage: "square.and.arrow.up")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(20)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.cyan.opacity(0.15)))
+    }
+
+    private func confidenceBadge(_ value: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)%").font(.title3.bold().monospacedDigit())
+            Text("ثقة").font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(width: 68, height: 68)
+        .background(Color.cyan.opacity(0.12), in: Circle())
+        .overlay(Circle().stroke(Color.cyan.opacity(0.35), lineWidth: 2))
+    }
+
+    private func section(title: String, icon: String, items: [String], warning: Bool = false) -> some View {
+        Group {
+            if !items.isEmpty {
+                VStack(alignment: .leading, spacing: 11) {
+                    Label(title, systemImage: icon)
+                        .font(.headline)
+                        .foregroundStyle(warning ? .orange : .white)
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(warning ? Color.orange : Color.cyan)
+                                .frame(width: 6, height: 6)
+                                .padding(.top, 7)
+                            Text(item).font(.subheadline).foregroundStyle(.white.opacity(0.78))
                             Spacer(minLength: 0)
                         }
                     }
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.07)))
-    }
-
-    private func voiceCard(_ p: PlantPersonaMessage) -> some View {
-        VStack(alignment: .leading, spacing: 17) {
-            HStack {
-                Label("صوت النبتة", systemImage: "waveform.circle.fill")
-                    .font(.caption.bold())
-                    .foregroundStyle(.green)
-                Spacer()
-                Text(p.mood)
-                    .font(.caption.bold())
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(.green.opacity(0.12), in: Capsule())
-            }
-
-            Text(p.title)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-            Text(p.message)
-                .font(.system(size: 21, weight: .medium, design: .rounded))
-                .lineSpacing(6)
-
-            HStack(spacing: 10) {
-                Button { app.speech.speak(p) } label: {
-                    Label("تشغيل", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 54)
-                        .background(.green, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                        .foregroundStyle(.black)
-                }
-                .buttonStyle(.plain)
-
-                Button { app.speech.stop() } label: {
-                    Image(systemName: "stop.fill")
-                        .frame(width: 54, height: 54)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                }
-                .buttonStyle(.plain)
-
-                ShareLink(item: "\(p.title)\n\n\(p.message)\n\n\(p.shortAction)") {
-                    Image(systemName: "square.and.arrow.up")
-                        .frame(width: 54, height: 54)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 17, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-
-            Button {
-                selectedTab = 2
-            } label: {
-                Label("غيّر الصوت والشخصية", systemImage: "waveform.badge.mic")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.green)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(
-            LinearGradient(colors: [.green.opacity(0.13), .white.opacity(0.04)], startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 26, style: .continuous)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 26).stroke(.green.opacity(0.16)))
     }
 
     private func errorCard(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("تعذر إكمال العملية", systemImage: "exclamationmark.triangle.fill")
+            Label("تعذر تحليل الصورة", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
                 .foregroundStyle(.red)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            Text(message).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    private func shareText(_ a: VisualAnalysis) -> String {
+        let facts = a.keyFacts.map { "• \($0)" }.joined(separator: "\n")
+        return "\(a.title)\n\(a.summary)\n\n\(facts)"
     }
 
     @MainActor
