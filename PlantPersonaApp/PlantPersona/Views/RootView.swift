@@ -1,60 +1,75 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 struct RootView: View {
     @EnvironmentObject private var app: AppState
     @State private var showCamera = false
-    @State private var showLibrary = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isLoadingPhoto = false
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color.black, Color(red: 0.04, green: 0.09, blue: 0.07)], startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
+            LinearGradient(
+                colors: [Color.black, Color(red: 0.04, green: 0.09, blue: 0.07)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 22) {
                     header
                     scannerCard
+                    if isLoadingPhoto { loadingPhotoCard }
                     if app.isAnalyzing { analyzingCard }
                     if let diagnosis = app.diagnosis { diagnosisCard(diagnosis) }
                     if let persona = app.persona { personaCard(persona) }
                     if let error = app.errorMessage { errorCard(error) }
                 }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 32)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+                .padding(.bottom, 40)
             }
+            .scrollIndicators(.hidden)
         }
-        .sheet(isPresented: $showCamera) {
-            CameraPicker(sourceType: .camera, onImage: handleImage)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraPicker(onImage: handleImage)
                 .ignoresSafeArea()
         }
-        .sheet(isPresented: $showLibrary) {
-            CameraPicker(sourceType: .photoLibrary, onImage: handleImage)
-                .ignoresSafeArea()
+        .fullScreenCover(isPresented: $app.showSettings) {
+            SettingsView()
         }
-        .sheet(isPresented: $app.showSettings) { SettingsView() }
+        .onChange(of: photoItem) { _, newItem in
+            guard let newItem else { return }
+            Task { await loadPhoto(newItem) }
+        }
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("PLANT PERSONA")
                     .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .tracking(2.2)
                     .foregroundStyle(.green.opacity(0.8))
                 Text("وش تقول نبتتك؟")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.82)
             }
-            Spacer()
+            Spacer(minLength: 8)
             Button { app.showSettings = true } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.title3)
-                    .padding(12)
+                    .frame(width: 48, height: 48)
                     .background(.thinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
         }
-        .padding(.top, 14)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 12)
     }
 
     private var scannerCard: some View {
@@ -62,26 +77,30 @@ struct RootView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 28)
                     .fill(Color.white.opacity(0.05))
-                    .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.green.opacity(0.22), lineWidth: 1))
-                    .frame(height: 320)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28)
+                            .stroke(Color.green.opacity(0.22), lineWidth: 1)
+                    )
 
                 if let data = app.selectedImageData, let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
-                        .frame(height: 320)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 28))
                         .overlay(alignment: .topLeading) {
                             Text("BIO-SCAN")
                                 .font(.caption2.monospaced().bold())
-                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
                                 .background(.black.opacity(0.55), in: Capsule())
                                 .padding(14)
                         }
                 } else {
                     VStack(spacing: 14) {
                         Image(systemName: "leaf.circle.fill")
-                            .font(.system(size: 70))
+                            .font(.system(size: 76))
                             .foregroundStyle(.green)
                             .symbolRenderingMode(.hierarchical)
                         Text("وجّه الكاميرا لأوراق النبتة")
@@ -93,12 +112,37 @@ struct RootView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(1.06, contentMode: .fit)
+            .frame(minHeight: 300, maxHeight: 430)
 
             HStack(spacing: 12) {
-                actionButton(title: "صوّر النبتة", icon: "camera.fill", primary: true) { showCamera = true }
-                actionButton(title: "من الصور", icon: "photo.on.rectangle", primary: false) { showLibrary = true }
+                actionButton(title: "صوّر النبتة", icon: "camera.fill", primary: true) {
+                    showCamera = true
+                }
+
+                PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
+                    Label("من الصور", systemImage: "photo.on.rectangle")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.white.opacity(0.12))
+                .disabled(isLoadingPhoto || app.isAnalyzing)
             }
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var loadingPhotoCard: some View {
+        HStack(spacing: 14) {
+            ProgressView().tint(.green)
+            Text("قاعد أجهز الصورة…").bold()
+            Spacer()
+        }
+        .padding(18)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 20))
     }
 
     private var analyzingCard: some View {
@@ -107,7 +151,8 @@ struct RootView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("قاعد أسمع شكوى النبتة…").bold()
                 Text("تحليل الصورة ثم تحويل التشخيص إلى شخصية")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -120,12 +165,15 @@ struct RootView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(d.plantName).font(.title2.bold())
-                    if let scientific = d.scientificName { Text(scientific).italic().foregroundStyle(.secondary) }
+                    if let scientific = d.scientificName {
+                        Text(scientific).italic().foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Text("\(d.confidence)%")
                     .font(.headline.monospacedDigit())
-                    .padding(.horizontal, 11).padding(.vertical, 7)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
                     .background(Color.green.opacity(0.14), in: Capsule())
             }
 
@@ -139,7 +187,8 @@ struct RootView: View {
                     Text("وش شاف الذكاء الاصطناعي").font(.subheadline.bold())
                     ForEach(d.visualEvidence, id: \.self) { item in
                         Label(item, systemImage: "viewfinder")
-                            .font(.subheadline).foregroundStyle(.secondary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -153,6 +202,7 @@ struct RootView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 24))
     }
@@ -162,10 +212,13 @@ struct RootView: View {
             HStack {
                 Label(p.mood, systemImage: "waveform")
                     .font(.caption.bold())
-                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(Color.green.opacity(0.14), in: Capsule())
                 Spacer()
-                Text("VOICE LOG 01").font(.caption2.monospaced()).foregroundStyle(.secondary)
+                Text("VOICE LOG 01")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
             }
             Text(p.title).font(.title2.bold())
             Text("“\(p.message)”")
@@ -187,23 +240,31 @@ struct RootView: View {
                 .tint(.green)
 
                 Button { app.speech.stop() } label: {
-                    Image(systemName: "stop.fill").padding(.vertical, 14).padding(.horizontal, 5)
+                    Image(systemName: "stop.fill")
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 5)
                 }
                 .buttonStyle(.bordered)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.green.opacity(0.22), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(Color.green.opacity(0.22), lineWidth: 1)
+        )
     }
 
     private func errorCard(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("ما قدرت أسمع النبتة", systemImage: "exclamationmark.triangle.fill").font(.headline)
+            Label("ما قدرت أسمع النبتة", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
             Text(message).foregroundStyle(.secondary)
             if message.contains("مفتاح Hugging Face") {
                 Button("فتح الإعدادات") { app.showSettings = true }
-                    .buttonStyle(.borderedProminent).tint(.green)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -211,7 +272,12 @@ struct RootView: View {
         .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
     }
 
-    private func actionButton(title: String, icon: String, primary: Bool, action: @escaping () -> Void) -> some View {
+    private func actionButton(
+        title: String,
+        icon: String,
+        primary: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
                 .font(.headline)
@@ -220,10 +286,34 @@ struct RootView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(primary ? .green : Color.white.opacity(0.12))
+        .disabled(isLoadingPhoto || app.isAnalyzing)
+    }
+
+    @MainActor
+    private func loadPhoto(_ item: PhotosPickerItem) async {
+        isLoadingPhoto = true
+        defer {
+            isLoadingPhoto = false
+            photoItem = nil
+        }
+
+        do {
+            guard let rawData = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: rawData) else {
+                app.errorMessage = "تعذر قراءة الصورة المختارة. جرّب صورة ثانية."
+                return
+            }
+            handleImage(image)
+        } catch {
+            app.errorMessage = "تعذر فتح الصورة: \(error.localizedDescription)"
+        }
     }
 
     private func handleImage(_ image: UIImage) {
-        guard let data = ImageCompressor.jpegData(from: image) else { return }
+        guard let data = ImageCompressor.jpegData(from: image) else {
+            app.errorMessage = "تعذر تجهيز الصورة للتحليل."
+            return
+        }
         app.selectedImageData = data
         Task { await app.analyze(imageData: data) }
     }
