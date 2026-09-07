@@ -1,23 +1,22 @@
 import Foundation
 
-struct PlantHistoryEntry: Codable, Identifiable, Equatable {
+struct AnalysisHistoryEntry: Codable, Identifiable, Equatable {
     let id: UUID
     let date: Date
-    let diagnosis: PlantDiagnosis
-    let persona: PlantPersonaMessage?
+    let analysis: VisualAnalysis
 }
 
 @MainActor
 final class PlantHistoryStore: ObservableObject {
-    @Published private(set) var entries: [PlantHistoryEntry] = []
-    private let key = "plant.persona.history.v1"
+    @Published private(set) var entries: [AnalysisHistoryEntry] = []
+    private let key = "ayn.visual.history.v1"
 
     init() { load() }
 
-    func add(diagnosis: PlantDiagnosis, persona: PlantPersonaMessage?) {
-        let item = PlantHistoryEntry(id: UUID(), date: Date(), diagnosis: diagnosis, persona: persona)
+    func add(analysis: VisualAnalysis) {
+        let item = AnalysisHistoryEntry(id: UUID(), date: Date(), analysis: analysis)
         entries.insert(item, at: 0)
-        if entries.count > 30 { entries = Array(entries.prefix(30)) }
+        if entries.count > 40 { entries = Array(entries.prefix(40)) }
         save()
     }
 
@@ -40,7 +39,7 @@ final class PlantHistoryStore: ObservableObject {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: key),
-              let decoded = try? JSONDecoder().decode([PlantHistoryEntry].self, from: data) else { return }
+              let decoded = try? JSONDecoder().decode([AnalysisHistoryEntry].self, from: data) else { return }
         entries = decoded
     }
 }
