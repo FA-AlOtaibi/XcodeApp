@@ -4,296 +4,211 @@ import PhotosUI
 
 struct RootView: View {
     @EnvironmentObject private var app: AppState
+    @State private var mode: AYNMode = .see
     @State private var showCamera = false
     @State private var photoItem: PhotosPickerItem?
     @State private var videoItem: PhotosPickerItem?
-    @State private var isLoadingMedia = false
-    @State private var selectedTab = 0
+    @State private var compareItems: [PhotosPickerItem] = []
+    @State private var compareImages: [Data] = []
+    @State private var isLoading = false
+    @State private var question = ""
+    @State private var technicianText = ""
+    @State private var newProfileName = ""
+    @State private var showProfiles = false
+    @State private var showOBD = false
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            studio
-                .tabItem { Label("عَيْن", systemImage: "viewfinder") }
-                .tag(0)
-
-            OBDView()
-                .tabItem { Label("السيارة", systemImage: "car.fill") }
-                .tag(1)
-
-            HistoryView()
-                .tabItem { Label("السجل", systemImage: "clock.arrow.circlepath") }
-                .tag(2)
-
-            SettingsView(embedInNavigation: true)
-                .tabItem { Label("الإعدادات", systemImage: "slider.horizontal.3") }
-                .tag(3)
-        }
-        .tint(.cyan)
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker(onImage: handleImage).ignoresSafeArea()
-        }
-        .onChange(of: photoItem) { _, item in
-            guard let item else { return }
-            Task { await loadPhoto(item) }
-        }
-        .onChange(of: videoItem) { _, item in
-            guard let item else { return }
-            Task { await loadVideo(item) }
-        }
-    }
-
-    private var studio: some View {
         NavigationStack {
             ZStack {
-                LinearGradient(colors: [.black, Color(red: 0.02, green: 0.04, blue: 0.075)], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+                LinearGradient(colors: [.black, Color(red: 0.018, green: 0.035, blue: 0.06)], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 18) {
-                        brandHeader
-                        scanner
-                        modeStrip
-                        if isLoadingMedia { statusCard("جاري تجهيز الوسائط…") }
-                        if app.isAnalyzing { statusCard(app.selectedMediaKind == "فيديو + صوت" ? "جاري فهم الفيديو والصوت…" : "جاري فهم الصورة…") }
-                        if let sound = app.soundProfile { soundCard(sound) }
+                        header
+                        modePicker
+                        switch mode {
+                        case .see: seeMode
+                        case .inspect: inspectMode
+                        case .car: carMode
+                        case .ask: askMode
+                        }
+                        if isLoading || app.isAnalyzing { progressCard }
+                        if let step = app.guidedStep { guidedCard(step) }
+                        if let result = app.compareResult { textResult(title: "المقارنة", icon: "rectangle.2.swap", text: result) }
+                        if let answer = app.assistantAnswer { textResult(title: "جواب عَيْن", icon: "bubble.left.and.text.bubble.right.fill", text: answer) }
                         if let analysis = app.analysis { analysisCard(analysis) }
                         if let error = app.errorMessage { errorCard(error) }
                     }
                     .padding(.horizontal, 18)
-                    .padding(.top, 12)
-                    .padding(.bottom, 34)
+                    .padding(.top, 10)
+                    .padding(.bottom, 42)
                 }
                 .scrollIndicators(.hidden)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .fullScreenCover(isPresented: $showCamera) { CameraPicker(onImage: handleImage).ignoresSafeArea() }
+        .sheet(isPresented: $showProfiles) { profileSheet }
+        .sheet(isPresented: $showOBD) { NavigationStack { OBDView() } }
+        .onChange(of: photoItem) { _, item in guard let item else { return }; Task { await loadPhoto(item) } }
+        .onChange(of: videoItem) { _, item in guard let item else { return }; Task { await loadVideo(item) } }
+        .onChange(of: compareItems) { _, items in Task { await loadCompare(items) } }
     }
 
-    private var brandHeader: some View {
+    private var header: some View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 18).fill(Color.cyan.opacity(0.14)).frame(width: 58, height: 58)
-                Image(systemName: "eye.fill").font(.system(size: 25, weight: .bold)).foregroundStyle(.cyan)
+                Image(systemName: "eye.fill").font(.system(size: 26, weight: .bold)).foregroundStyle(.cyan)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("عَيْن").font(.system(size: 32, weight: .black, design: .rounded))
-                Text("صورة، فيديو، صوت، وبيانات سيارة").font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) { Text("عَيْن").font(.system(size: 33, weight: .black, design: .rounded)); Text("4.0").font(.caption.bold().monospaced()).foregroundStyle(.cyan) }
+                Text("يشوف، يفحص، يتذكر، ويقترح الخطوة الجاية").font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("3.0").font(.caption.monospaced().bold()).foregroundStyle(.cyan)
+            Button { showProfiles = true } label: { Image(systemName: "tray.full.fill").font(.title3).frame(width: 44, height: 44).background(.white.opacity(0.07), in: Circle()) }.buttonStyle(.plain)
         }
     }
 
-    private var scanner: some View {
+    private var modePicker: some View {
+        HStack(spacing: 8) {
+            ForEach(AYNMode.allCases) { item in
+                Button { withAnimation(.snappy) { mode = item } } label: {
+                    VStack(spacing: 6) { Image(systemName: icon(for: item)).font(.system(size: 17, weight: .bold)); Text(item.rawValue).font(.caption.bold()) }
+                        .frame(maxWidth: .infinity).frame(height: 62)
+                        .background(mode == item ? Color.cyan : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 17))
+                        .foregroundStyle(mode == item ? .black : .white)
+                }.buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func icon(for mode: AYNMode) -> String {
+        switch mode { case .see: return "viewfinder"; case .inspect: return "stethoscope"; case .car: return "car.fill"; case .ask: return "bubble.left.and.bubble.right.fill" }
+    }
+
+    private var seeMode: some View {
         VStack(spacing: 14) {
-            ZStack(alignment: .bottomLeading) {
-                Group {
-                    if let data = app.selectedImageData, let image = UIImage(data: data) {
-                        Image(uiImage: image).resizable().scaledToFill()
-                    } else {
-                        LinearGradient(colors: [Color.white.opacity(0.07), Color.cyan.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                            .overlay {
-                                VStack(spacing: 14) {
-                                    Image(systemName: "viewfinder.circle.fill").font(.system(size: 86)).foregroundStyle(.cyan.opacity(0.8))
-                                    Text("خل عَيْن يفهم اللي قدامك").font(.title2.bold())
-                                    Text("صوّر شيء، اختر فيديو لصوت عطل، أو اربط OBD للسيارة").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 25)
-                                }
-                            }
-                    }
-                }
-                .frame(maxWidth: .infinity).frame(height: 410).clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 30))
-                .overlay(RoundedRectangle(cornerRadius: 30).stroke(Color.white.opacity(0.10)))
+            mediaHero(title: "وش هذا؟", subtitle: "صوّر أي شيء وخذ شرحًا مبسطًا وتفاصيل مفيدة")
+            mediaButtons
+            featureRow([("نصوص وأكواد","text.viewfinder"),("طريقة الاستخدام","gearshape.2"),("تنبيهات","exclamationmark.triangle")])
+        }
+    }
 
-                HStack {
-                    Label(app.selectedImageData == nil ? "جاهز" : app.selectedMediaKind, systemImage: app.selectedMediaKind == "فيديو + صوت" ? "waveform.and.magnifyingglass" : "dot.radiowaves.left.and.right")
-                    Spacer()
-                    if app.selectedImageData != nil { Button("مسح") { app.reset() }.buttonStyle(.plain) }
-                }
-                .font(.caption.bold()).padding(16).background(.ultraThinMaterial)
-                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 30, bottomTrailingRadius: 30))
+    private var inspectMode: some View {
+        VStack(spacing: 14) {
+            sectionHeader("فحص ذكي", "استخدم أكثر من زاوية أو قارن قبل/بعد بدل الاعتماد على لقطة واحدة")
+            mediaButtons
+            PhotosPicker(selection: $compareItems, maxSelectionCount: 6, matching: .images) {
+                actionCard(title: "مقارنة قبل / بعد", subtitle: compareImages.isEmpty ? "اختر صورتين إلى 6 صور" : "تم تجهيز \(compareImages.count) صور", icon: "rectangle.2.swap", accent: .purple)
+            }.buttonStyle(.plain)
+            if !compareImages.isEmpty {
+                Button { Task { await app.compare(images: compareImages, prompt: "قارن هذه الصور زمنيًا أو من حيث الحالة، واكشف أي تغير أو تدهور أو تحسن واضح.") } } label: { primaryButton("ابدأ المقارنة", icon: "arrow.triangle.2.circlepath") }.buttonStyle(.plain)
             }
+            Button { Task { await app.nextGuidedStep(mode: "فحص عام") } } label: { actionCard(title: "وجّهني للّقطة التالية", subtitle: "عَيْن يقول لك وش تصوّر بعد عشان يزيد دقة الفحص", icon: "camera.metering.center.weighted", accent: .cyan) }.buttonStyle(.plain)
+        }
+    }
 
+    private var carMode: some View {
+        VStack(spacing: 14) {
+            sectionHeader("مختبر السيارة", "صورة + فيديو وصوت + OBD + أسئلة قصيرة = تشخيص أذكى")
+            mediaButtons
             HStack(spacing: 10) {
-                Button { showCamera = true } label: {
-                    mediaButton("كاميرا", icon: "camera.fill", primary: true)
-                }
-                .buttonStyle(.plain)
-
-                PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                    mediaButton("صورة", icon: "photo.fill", primary: false)
-                }
-                .buttonStyle(.plain)
-
-                PhotosPicker(selection: $videoItem, matching: .videos, photoLibrary: .shared()) {
-                    mediaButton("فيديو", icon: "video.fill", primary: false)
-                }
-                .buttonStyle(.plain)
+                Button { showOBD = true } label: { miniAction("OBD", "cable.connector", .orange) }.buttonStyle(.plain)
+                Button { Task { await app.nextGuidedStep(mode: "تشخيص سيارة") } } label: { miniAction("فحص موجه", "checklist", .cyan) }.buttonStyle(.plain)
             }
-            .disabled(isLoadingMedia || app.isAnalyzing)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("راجع كلام الفني").font(.headline)
+                TextField("مثال: قال لازم أغير كمبروسر المكيف كامل", text: $technicianText, axis: .vertical)
+                    .textFieldStyle(.plain).padding(14).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 15))
+                Button { Task { await app.reviewTechnician(technicianText) } } label: { primaryButton("حلّل كلام الفني", icon: "person.crop.circle.badge.questionmark") }.buttonStyle(.plain).disabled(technicianText.isEmpty)
+            }.padding(16).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
+            featureRow([("درجة خطورة","gauge.with.dots.needle.67percent"),("ترتيب الأسباب","list.number"),("تكلفة تقريبية","banknote"),("هل تسوق؟","steeringwheel")])
         }
     }
 
-    private func mediaButton(_ title: String, icon: String, primary: Bool) -> some View {
-        Label(title, systemImage: icon)
-            .font(.subheadline.bold())
-            .frame(maxWidth: .infinity).frame(height: 56)
-            .background(primary ? Color.cyan : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-            .foregroundStyle(primary ? .black : .white)
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(primary ? 0 : 0.10)))
-    }
-
-    private var modeStrip: some View {
-        HStack(spacing: 10) {
-            capability("أي شيء", "cube.transparent")
-            capability("أعطال سيارة", "wrench.and.screwdriver")
-            capability("صوت فيديو", "waveform")
-            capability("OBD", "cable.connector")
-        }
-        .font(.caption2.bold())
-    }
-
-    private func capability(_ text: String, _ icon: String) -> some View {
-        Label(text, systemImage: icon)
-            .frame(maxWidth: .infinity).padding(.vertical, 10)
-            .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 13))
-    }
-
-    private func statusCard(_ text: String) -> some View {
-        HStack(spacing: 14) { ProgressView().tint(.cyan); Text(text).font(.headline); Spacer() }
-            .padding(18).background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 22))
-    }
-
-    private func soundCard(_ s: MediaSoundProfile) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("بصمة الصوت من الفيديو", systemImage: "waveform.badge.magnifyingglass").font(.headline).foregroundStyle(.cyan)
-            HStack {
-                metric("المدة", String(format: "%.1fs", s.durationSeconds))
-                metric("RMS", String(format: "%.3f", s.rms))
-                metric("Peak", String(format: "%.3f", s.peak))
-                if let hz = s.dominantPulseHz { metric("نبض", String(format: "%.1fHz", hz)) }
+    private var askMode: some View {
+        VStack(spacing: 14) {
+            sectionHeader("اسأل عَيْن", "يسأل على آخر صورة أو فيديو أو OBD بدل ما تبدأ من الصفر")
+            TextField("مثال: كيف أفك هذي القطعة؟ وش أفحص قبل أشتري بديل؟", text: $question, axis: .vertical)
+                .textFieldStyle(.plain).padding(16).background(.white.opacity(0.065), in: RoundedRectangle(cornerRadius: 18))
+            Button { let q = question; question = ""; Task { await app.ask(q) } } label: { primaryButton("اسأل", icon: "arrow.up.circle.fill") }.buttonStyle(.plain).disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            VStack(spacing: 8) {
+                ForEach(["هل هذا طبيعي؟","كيف أفكه بأمان؟","وش أسوأ احتمال؟","وش الاختبار اللي يثبت العطل؟","وش اسم القطعة الصحيح؟"], id: \.self) { q in
+                    Button { Task { await app.ask(q) } } label: { HStack { Text(q); Spacer(); Image(systemName: "chevron.left") }.font(.subheadline.bold()).padding(14).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 14)) }.buttonStyle(.plain)
+                }
             }
-            Text(s.note).font(.caption).foregroundStyle(.secondary)
         }
-        .padding(17).background(Color.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 21))
     }
 
-    private func metric(_ title: String, _ value: String) -> some View {
-        VStack(spacing: 3) { Text(value).font(.caption.bold().monospacedDigit()); Text(title).font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+    private func mediaHero(title: String, subtitle: String) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            Group {
+                if let data = app.selectedImageData, let image = UIImage(data: data) { Image(uiImage: image).resizable().scaledToFill() }
+                else { LinearGradient(colors: [.white.opacity(0.06), .cyan.opacity(0.07)], startPoint: .topLeading, endPoint: .bottomTrailing).overlay { VStack(spacing: 12) { Image(systemName: "viewfinder.circle.fill").font(.system(size: 78)).foregroundStyle(.cyan.opacity(0.85)); Text(title).font(.title2.bold()); Text(subtitle).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 24) } } }
+            }
+            .frame(maxWidth: .infinity).frame(height: 355).clipped().clipShape(RoundedRectangle(cornerRadius: 28)).overlay(RoundedRectangle(cornerRadius: 28).stroke(.white.opacity(0.1)))
+            HStack { Label(app.selectedMediaKind, systemImage: "dot.radiowaves.left.and.right"); Spacer(); if app.selectedImageData != nil { Button("مسح") { app.reset() }.buttonStyle(.plain) } }
+                .font(.caption.bold()).padding(15).background(.ultraThinMaterial).clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 28, bottomTrailingRadius: 28))
+        }
     }
+
+    private var mediaButtons: some View {
+        HStack(spacing: 9) {
+            Button { showCamera = true } label: { mediaButton("كاميرا", "camera.fill", true) }.buttonStyle(.plain)
+            PhotosPicker(selection: $photoItem, matching: .images) { mediaButton("صورة", "photo.fill", false) }.buttonStyle(.plain)
+            PhotosPicker(selection: $videoItem, matching: .videos) { mediaButton("فيديو", "video.fill", false) }.buttonStyle(.plain)
+        }.disabled(isLoading || app.isAnalyzing)
+    }
+
+    private func mediaButton(_ title: String, _ icon: String, _ primary: Bool) -> some View {
+        Label(title, systemImage: icon).font(.subheadline.bold()).frame(maxWidth: .infinity).frame(height: 54).background(primary ? Color.cyan : Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 17)).foregroundStyle(primary ? .black : .white)
+    }
+
+    private func sectionHeader(_ title: String, _ subtitle: String) -> some View { VStack(alignment: .leading, spacing: 4) { Text(title).font(.title2.bold()); Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading) }
+    private func actionCard(title: String, subtitle: String, icon: String, accent: Color) -> some View { HStack(spacing: 14) { Image(systemName: icon).font(.title2.bold()).foregroundStyle(accent).frame(width: 48, height: 48).background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14)); VStack(alignment: .leading, spacing: 3) { Text(title).font(.headline); Text(subtitle).font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.left").foregroundStyle(.secondary) }.padding(15).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18)) }
+    private func miniAction(_ title: String, _ icon: String, _ color: Color) -> some View { Label(title, systemImage: icon).font(.headline).frame(maxWidth: .infinity).frame(height: 58).background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 18)).foregroundStyle(color) }
+    private func primaryButton(_ title: String, icon: String) -> some View { Label(title, systemImage: icon).font(.headline).frame(maxWidth: .infinity).frame(height: 54).background(.cyan, in: RoundedRectangle(cornerRadius: 17)).foregroundStyle(.black) }
+    private func featureRow(_ items: [(String,String)]) -> some View { HStack(spacing: 8) { ForEach(Array(items.enumerated()), id: \.offset) { _, item in VStack(spacing: 6) { Image(systemName: item.1); Text(item.0).font(.caption2.bold()).multilineTextAlignment(.center) }.frame(maxWidth: .infinity).padding(.vertical, 12).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 13)) } } }
+
+    private var progressCard: some View { HStack(spacing: 13) { ProgressView().tint(.cyan); Text(isLoading ? "جاري تجهيز الوسائط…" : "عَيْن يفكر…").font(.headline); Spacer() }.padding(16).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18)) }
+    private func guidedCard(_ text: String) -> some View { VStack(alignment: .leading, spacing: 8) { Label("اللقطة التالية", systemImage: "camera.badge.ellipsis").font(.headline).foregroundStyle(.cyan); Text(text); Button { showCamera = true } label: { Label("افتح الكاميرا", systemImage: "camera.fill") }.buttonStyle(.borderedProminent).tint(.cyan) }.frame(maxWidth: .infinity, alignment: .leading).padding(17).background(.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 20)) }
+    private func textResult(title: String, icon: String, text: String) -> some View { VStack(alignment: .leading, spacing: 10) { Label(title, systemImage: icon).font(.headline).foregroundStyle(.cyan); Text(text).font(.body).textSelection(.enabled) }.frame(maxWidth: .infinity, alignment: .leading).padding(18).background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 20)) }
 
     private func analysisCard(_ a: VisualAnalysis) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(a.category.uppercased()).font(.caption.bold()).foregroundStyle(.cyan)
-                    Text(a.title).font(.system(size: 29, weight: .bold, design: .rounded))
-                    Text(a.summary).foregroundStyle(.white.opacity(0.78)).lineSpacing(4)
-                }
-                Spacer(minLength: 12)
-                confidenceBadge(a.confidence)
-            }
-
-            if let auto = a.automotive, auto.isVehicleRelated { automotiveCard(auto) }
-            section(title: "أهم المعلومات", icon: "sparkles", items: a.keyFacts)
-            section(title: "وش ظاهر", icon: "eye", items: a.visibleDetails)
-            section(title: "كيف يعمل أو يُستخدم", icon: "gearshape.2", items: a.howItWorksOrUsed)
-            if !a.cautions.isEmpty { section(title: "تنبيهات", icon: "exclamationmark.triangle", items: a.cautions, warning: true) }
-            if let uncertainty = a.uncertainty, !uncertainty.isEmpty {
-                Label(uncertainty, systemImage: "questionmark.circle.fill").font(.subheadline).foregroundStyle(.orange)
-                    .padding(14).background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-            }
-            ShareLink(item: shareText(a)) {
-                Label("مشاركة النتيجة", systemImage: "square.and.arrow.up").font(.headline).frame(maxWidth: .infinity).frame(height: 54).background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-            }.buttonStyle(.plain)
-        }
-        .padding(20).background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 28))
-        .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.cyan.opacity(0.15)))
-    }
-
-    private func automotiveCard(_ a: AutomotiveDiagnostic) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Label("تشخيص السيارة", systemImage: "car.badge.gearshape.fill").font(.title3.bold()).foregroundStyle(.cyan)
-                Spacer()
-                if let severity = a.severity { Text(severity.uppercased()).font(.caption.bold()).padding(.horizontal, 9).padding(.vertical, 6).background(severity == "critical" ? Color.red.opacity(0.2) : Color.orange.opacity(0.15), in: Capsule()) }
-            }
-            if let system = a.probableSystem { Label(system, systemImage: "wrench.adjustable").font(.headline) }
-            if let drive = a.canDrive { Label("القيادة: \(drive)", systemImage: drive == "لا" ? "hand.raised.fill" : "steeringwheel").foregroundStyle(drive == "لا" ? .red : .orange).font(.headline) }
-
-            if !a.likelyCauses.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("الأسباب المرجحة").font(.headline)
-                    ForEach(Array(a.likelyCauses.enumerated()), id: \.offset) { index, cause in
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack { Text("\(index + 1). \(cause.cause)").bold(); Spacer(); Text("\(cause.probability)%").font(.caption.bold().monospacedDigit()).foregroundStyle(.cyan) }
-                            Text(cause.reasoning).font(.subheadline).foregroundStyle(.secondary)
-                        }.padding(12).background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-            }
-            section(title: "افحص بهذا الترتيب", icon: "checklist", items: a.checks)
-            section(title: "الحلول المحتملة", icon: "wrench.and.screwdriver", items: a.fixes)
-            if !a.dtcHints.isEmpty { section(title: "أكواد OBD محتملة", icon: "number.square", items: a.dtcHints) }
-            if let note = a.mechanicNote, !note.isEmpty { Text(note).font(.footnote).foregroundStyle(.secondary).padding(12).background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14)) }
-        }
-        .padding(16).background(Color.cyan.opacity(0.065), in: RoundedRectangle(cornerRadius: 20))
-        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.cyan.opacity(0.16)))
+            HStack(alignment: .top) { VStack(alignment: .leading, spacing: 5) { Text(a.category.uppercased()).font(.caption.bold()).foregroundStyle(.cyan); Text(a.title).font(.title.bold()); Text(a.summary).foregroundStyle(.white.opacity(0.78)) }; Spacer(); Text("\(a.confidence)%").font(.headline.monospacedDigit()).padding(10).background(.cyan.opacity(0.12), in: Circle()) }
+            if let car = a.automotive, car.isVehicleRelated { carDiagnosis(car) }
+            bullets("أهم المعلومات", a.keyFacts, "sparkles"); bullets("الظاهر بالصورة", a.visibleDetails, "eye"); bullets("الاستخدام / العمل", a.howItWorksOrUsed, "gearshape.2")
+            if !a.cautions.isEmpty { bullets("تنبيهات", a.cautions, "exclamationmark.triangle.fill", .orange) }
+            if let u = a.uncertainty, !u.isEmpty { Label(u, systemImage: "questionmark.circle").font(.subheadline).foregroundStyle(.secondary) }
+            Button { Task { await app.nextGuidedStep(mode: mode.rawValue) } } label: { Label("كيف أكمل الفحص؟", systemImage: "arrow.triangle.branch") }.buttonStyle(.bordered).tint(.cyan)
+        }.padding(18).background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 24)).overlay(RoundedRectangle(cornerRadius: 24).stroke(.cyan.opacity(0.14)))
     }
 
-    private func confidenceBadge(_ value: Int) -> some View {
-        VStack(spacing: 2) { Text("\(value)%").font(.title3.bold().monospacedDigit()); Text("ثقة").font(.caption2).foregroundStyle(.secondary) }
-            .frame(width: 68, height: 68).background(Color.cyan.opacity(0.12), in: Circle()).overlay(Circle().stroke(Color.cyan.opacity(0.35), lineWidth: 2))
+    private func carDiagnosis(_ c: AutomotiveDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack { Label("تشخيص السيارة", systemImage: "car.badge.gearshape.fill").font(.headline).foregroundStyle(.cyan); Spacer(); if let s = c.severity { Text(s.uppercased()).font(.caption.bold()).foregroundStyle(s == "critical" ? .red : .orange) } }
+            if let system = c.probableSystem { Text("النظام المحتمل: \(system)").bold() }
+            if let drive = c.canDrive { Text("القيادة: \(drive)").foregroundStyle(drive == "لا" ? .red : .orange).bold() }
+            ForEach(Array(c.likelyCauses.enumerated()), id: \.offset) { index, cause in VStack(alignment: .leading, spacing: 4) { HStack { Text("\(index+1). \(cause.cause)").bold(); Spacer(); Text("\(cause.probability)%").foregroundStyle(.cyan).font(.caption.bold()) }; Text(cause.reasoning).font(.caption).foregroundStyle(.secondary) }.padding(11).background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12)) }
+            bullets("افحص بهذا الترتيب", c.checks, "checklist"); bullets("الحلول المحتملة", c.fixes, "wrench.and.screwdriver"); if !c.dtcHints.isEmpty { bullets("أكواد OBD", c.dtcHints, "number.square") }
+        }.padding(15).background(.cyan.opacity(0.055), in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private func section(title: String, icon: String, items: [String], warning: Bool = false) -> some View {
-        Group {
-            if !items.isEmpty {
-                VStack(alignment: .leading, spacing: 11) {
-                    Label(title, systemImage: icon).font(.headline).foregroundStyle(warning ? .orange : .white)
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        HStack(alignment: .top, spacing: 10) {
-                            Circle().fill(warning ? Color.orange : Color.cyan).frame(width: 6, height: 6).padding(.top, 7)
-                            Text(item).font(.subheadline).foregroundStyle(.white.opacity(0.78)); Spacer(minLength: 0)
-                        }
-                    }
-                }
-            }
+    private func bullets(_ title: String, _ items: [String], _ icon: String, _ color: Color = .white) -> some View { Group { if !items.isEmpty { VStack(alignment: .leading, spacing: 8) { Label(title, systemImage: icon).font(.headline).foregroundStyle(color); ForEach(Array(items.enumerated()), id: \.offset) { _, t in HStack(alignment: .top, spacing: 8) { Circle().fill(color == .white ? Color.cyan : color).frame(width: 6, height: 6).padding(.top, 6); Text(t).font(.subheadline); Spacer(minLength: 0) } } } } } }
+    private func errorCard(_ text: String) -> some View { VStack(alignment: .leading, spacing: 8) { Label("تعذر التنفيذ", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(.red); Text(text).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(17).background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 18)) }
+
+    private var profileSheet: some View {
+        NavigationStack {
+            List {
+                Section("ملف جديد") { TextField("مثال: يوكن 2013، مكيف الصالة", text: $newProfileName); Button("إنشاء ملف") { if !newProfileName.isEmpty { let p = app.workspace.addProfile(name: newProfileName, kind: "عام"); app.selectedProfileID = p.id; newProfileName = "" } }.disabled(newProfileName.isEmpty) }
+                Section("ملفاتي") { ForEach(app.workspace.profiles) { p in Button { app.selectedProfileID = p.id; showProfiles = false } label: { HStack { VStack(alignment: .leading) { Text(p.name).font(.headline); Text("\(app.workspace.events(for: p.id).count) حدث").font(.caption).foregroundStyle(.secondary) }; Spacer(); if app.selectedProfileID == p.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan) } } } } }
+            }.navigationTitle("ذاكرة عَيْن")
         }
     }
 
-    private func errorCard(_ message: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) { Label("تعذر التحليل", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(.red); Text(message).foregroundStyle(.secondary) }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(18).background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
-    }
-
-    private func shareText(_ a: VisualAnalysis) -> String {
-        var text = "\(a.title)\n\(a.summary)\n\n" + a.keyFacts.map { "• \($0)" }.joined(separator: "\n")
-        if let auto = a.automotive, auto.isVehicleRelated { text += "\n\nتشخيص السيارة:\n" + auto.likelyCauses.map { "• \($0.cause) — \($0.probability)%" }.joined(separator: "\n") }
-        return text
-    }
-
-    @MainActor
-    private func loadPhoto(_ item: PhotosPickerItem) async {
-        isLoadingMedia = true
-        defer { isLoadingMedia = false; photoItem = nil }
-        do {
-            guard let rawData = try await item.loadTransferable(type: Data.self), let image = UIImage(data: rawData) else { app.errorMessage = "تعذر قراءة الصورة المختارة."; return }
-            handleImage(image)
-        } catch { app.errorMessage = "تعذر فتح الصورة: \(error.localizedDescription)" }
-    }
-
-    @MainActor
-    private func loadVideo(_ item: PhotosPickerItem) async {
-        isLoadingMedia = true
-        defer { isLoadingMedia = false; videoItem = nil }
-        do {
-            guard let data = try await item.loadTransferable(type: Data.self) else { app.errorMessage = "تعذر قراءة الفيديو."; return }
-            await app.analyzeVideo(data: data)
-        } catch { app.errorMessage = "تعذر فتح الفيديو: \(error.localizedDescription)" }
-    }
-
-    private func handleImage(_ image: UIImage) {
-        guard let data = ImageCompressor.jpegData(from: image) else { app.errorMessage = "تعذر تجهيز الصورة للتحليل."; return }
-        app.selectedImageData = data
-        Task { await app.analyze(imageData: data) }
-    }
+    private func handleImage(_ image: UIImage) { guard let data = ImageCompressor.jpegData(from: image) else { app.errorMessage = "تعذر تجهيز الصورة."; return }; app.selectedImageData = data; Task { await app.analyze(imageData: data) } }
+    @MainActor private func loadPhoto(_ item: PhotosPickerItem) async { isLoading = true; defer { isLoading = false; photoItem = nil }; do { guard let raw = try await item.loadTransferable(type: Data.self), let image = UIImage(data: raw) else { app.errorMessage = "تعذر قراءة الصورة."; return }; handleImage(image) } catch { app.errorMessage = error.localizedDescription } }
+    @MainActor private func loadVideo(_ item: PhotosPickerItem) async { isLoading = true; defer { isLoading = false; videoItem = nil }; do { guard let data = try await item.loadTransferable(type: Data.self) else { app.errorMessage = "تعذر قراءة الفيديو."; return }; await app.analyzeVideo(data: data) } catch { app.errorMessage = error.localizedDescription } }
+    @MainActor private func loadCompare(_ items: [PhotosPickerItem]) async { isLoading = true; compareImages = []; defer { isLoading = false }; for item in items.prefix(6) { if let raw = try? await item.loadTransferable(type: Data.self), let img = UIImage(data: raw), let data = ImageCompressor.jpegData(from: img) { compareImages.append(data) } } }
 }
