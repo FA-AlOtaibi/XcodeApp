@@ -6,10 +6,6 @@ final class HuggingFaceService {
         "zai-org/GLM-5.3-Flash:baseten",
         "Qwen/Qwen3-VL-8B-Instruct:fireworks-ai"
     ]
-    private let personaModels = [
-        "zai-org/GLM-5.3-Flash:baseten",
-        "Qwen/Qwen3.8-27B:deepinfra"
-    ]
 
     enum HFError: LocalizedError {
         case missingToken
@@ -29,43 +25,43 @@ final class HuggingFaceService {
             case .parse:
                 return "وصلت نتيجة غير مفهومة من النموذج. جرّب صورة أوضح."
             case .noAvailableProvider:
-                return "ما فيه مزوّد متاح لهذا التحليل الآن. تأكد أن مفتاح Hugging Face يسمح باستخدام Inference Providers ثم جرّب مرة أخرى."
+                return "ما فيه مزوّد متاح للتحليل الآن. تأكد أن مفتاح Hugging Face يسمح باستخدام Inference Providers ثم جرّب مرة أخرى."
             }
         }
     }
 
-    func diagnosePlant(imageData: Data) async throws -> PlantDiagnosis {
+    func analyzeImage(imageData: Data) async throws -> VisualAnalysis {
         let base64 = imageData.base64EncodedString()
         let system = """
-        افحص صورة النبتة كخبير عناية بالنباتات المنزلية. أعد JSON فقط بلا Markdown:
-        {"plantName":"","scientificName":null,"healthStatus":"","likelyIssue":"","confidence":0,"urgency":"low|medium|high","visualEvidence":[""],"careSteps":[""],"warning":null}
-        اكتب بالعربية، confidence من 0 إلى 100، ولا تدّعي اليقين من صورة واحدة.
+        أنت محلل بصري عام. حلّل أي صورة يرسلها المستخدم: جسم، منتج، جهاز، سيارة، أداة، طعام، مبنى، حيوان، نبات، مشهد أو أي شيء آخر.
+        مهمتك أن تشرح ما يظهر ببساطة وبدقة، بدون اختلاق تفاصيل غير مرئية.
+        أعد JSON فقط بلا Markdown بهذا الشكل:
+        {"title":"","category":"","summary":"","confidence":0,"keyFacts":[""],"visibleDetails":[""],"howItWorksOrUsed":[""],"cautions":[""],"uncertainty":null}
+
+        القواعد:
+        - اكتب بالعربية السهلة.
+        - title اسم العنصر أو وصف مختصر جدًا للمشهد.
+        - category فئة عامة مثل: إلكترونيات، سيارة، أداة، طعام، نبات، مبنى، حيوان، ملابس، مشهد، غير ذلك.
+        - summary شرح مبسط من سطرين إلى أربعة.
+        - confidence من 0 إلى 100 بناءً على وضوح الصورة.
+        - keyFacts حقائق مفيدة ومختصرة مرتبطة بما تم التعرف عليه.
+        - visibleDetails فقط ما يمكن ملاحظته بصريًا في الصورة.
+        - howItWorksOrUsed يشرح الاستخدام أو الوظيفة أو طريقة العمل عندما يكون ذلك مناسبًا.
+        - cautions للمخاطر أو التنبيهات العملية فقط عند الحاجة، وإلا أعد مصفوفة فارغة.
+        - uncertainty اذكر فيه ما لم تستطع تأكيده، وإلا null.
+        - إذا لم تستطع التعرف على العنصر تحديدًا، صفه بدقة ولا تخمن علامة تجارية أو موديلًا.
         """
+
         let messages: [[String: Any]] = [
             ["role": "system", "content": system],
             ["role": "user", "content": [
-                ["type": "text", "text": "حلّل هذه النبتة وحدد نوعها وحالتها والمشكلة المحتملة وخطوات العناية."],
+                ["type": "text", "text": "عرّف لي ما في هذه الصورة واشرحه ببساطة ثم أعطني التفاصيل المفيدة التي تستطيع استنتاجها بصريًا."],
                 ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(base64)"]]
             ]]
         ]
-        let text = try await performWithFallback(models: visionModels, messages: messages, temperature: 0.15, maxTokens: 850)
-        return try decodeJSON(PlantDiagnosis.self, from: text)
-    }
 
-    func generatePersona(for diagnosis: PlantDiagnosis) async throws -> PlantPersonaMessage {
-        let data = try JSONEncoder().encode(diagnosis)
-        let json = String(data: data, encoding: .utf8) ?? "{}"
-        let system = """
-        حوّل تشخيص النبتة إلى رسالة عربية سعودية خفيفة وطريفة على لسان النبتة. أعد JSON فقط:
-        {"mood":"","title":"","message":"","shortAction":"","voiceRate":0.47,"voicePitch":1.05}
-        لا تضف معلومات تخالف التشخيص. اجعل الرسالة قصيرة وواضحة.
-        """
-        let messages: [[String: Any]] = [
-            ["role": "system", "content": system],
-            ["role": "user", "content": "التشخيص: \(json)"]
-        ]
-        let text = try await performWithFallback(models: personaModels, messages: messages, temperature: 0.75, maxTokens: 450)
-        return try decodeJSON(PlantPersonaMessage.self, from: text)
+        let text = try await performWithFallback(models: visionModels, messages: messages, temperature: 0.12, maxTokens: 1100)
+        return try decodeJSON(VisualAnalysis.self, from: text)
     }
 
     private func performWithFallback(models: [String], messages: [[String: Any]], temperature: Double, maxTokens: Int) async throws -> String {
@@ -83,7 +79,7 @@ final class HuggingFaceService {
         if let lastMessage {
             let lower = lastMessage.lowercased()
             if lower.contains("401") || lower.contains("unauthorized") || lower.contains("token") {
-                throw HFError.server("مفتاح Hugging Face غير صالح أو ناقص الصلاحيات. أنشئ Fine-grained token بصلاحية Inference Providers.")
+                throw HFError.server("مفتاح Hugging Face غير صالح أو ناقص الصلاحيات. استخدم Fine-grained token بصلاحية Inference Providers.")
             }
         }
         throw HFError.noAvailableProvider
