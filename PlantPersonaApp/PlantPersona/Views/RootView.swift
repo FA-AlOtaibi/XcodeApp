@@ -9,6 +9,7 @@ struct RootView: View {
     @State private var showCamera = false
     @State private var showProfiles = false
     @State private var showOBD = false
+    @State private var showSettings = false
 
     @State private var photoItem: PhotosPickerItem?
     @State private var videoItem: PhotosPickerItem?
@@ -24,35 +25,34 @@ struct RootView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                background
-
+                warmBackground
                 ScrollView {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 14) {
                         header
-                        modeDock
                         modeContent
 
-                        if isLoadingMedia || app.isAnalyzing { loadingBar }
+                        if isLoadingMedia || app.isAnalyzing { loadingPill }
+                        if let error = app.errorMessage { errorCard(error) }
                         if let answer = app.assistantAnswer { answerCard(answer) }
                         if let step = app.guidedStep, !step.isEmpty { guidedCard(step) }
-                        if let compare = app.compareResult { simpleTextCard("المقارنة", icon: "rectangle.2.swap", text: compare) }
+                        if let compare = app.compareResult { noteCard(title: "المقارنة", icon: "arrow.left.arrow.right", text: compare) }
                         if let result = app.analysis { resultCard(result) }
-                        if let error = app.errorMessage { errorCard(error) }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 17)
                     .padding(.top, 8)
-                    .padding(.bottom, 44)
+                    .padding(.bottom, 110)
                 }
                 .scrollIndicators(.hidden)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomDock }
         .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker(onImage: handleImage)
-                .ignoresSafeArea()
+            CameraPicker(onImage: handleImage).ignoresSafeArea()
         }
         .sheet(isPresented: $showProfiles) { profilesSheet }
         .sheet(isPresented: $showOBD) { NavigationStack { OBDView() } }
+        .sheet(isPresented: $showSettings) { SettingsView(embedInNavigation: false) }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task { await loadPhoto(item) }
@@ -61,67 +61,94 @@ struct RootView: View {
             guard let item else { return }
             Task { await loadVideo(item) }
         }
-        .onChange(of: compareItems) { _, items in
-            Task { await loadCompare(items) }
-        }
+        .onChange(of: compareItems) { _, items in Task { await loadCompare(items) } }
     }
 
-    private var background: some View {
+    private var warmBackground: some View {
         ZStack {
-            Color.aynInk.ignoresSafeArea()
-            RadialGradient(colors: [.cyan.opacity(0.13), .clear], center: .topTrailing, startRadius: 20, endRadius: 420)
-                .ignoresSafeArea()
-            RadialGradient(colors: [.aynViolet.opacity(0.10), .clear], center: .bottomLeading, startRadius: 30, endRadius: 480)
-                .ignoresSafeArea()
+            Color.aynGraphite.ignoresSafeArea()
+            LinearGradient(
+                colors: [Color.aynGraphite2.opacity(0.8), Color.aynGraphite, Color.black.opacity(0.45)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+            Circle()
+                .fill(Color.aynLime.opacity(0.065))
+                .frame(width: 360, height: 360)
+                .blur(radius: 80)
+                .offset(x: 170, y: -280)
+                .allowsHitTesting(false)
+            Circle()
+                .fill(Color.aynClay.opacity(0.055))
+                .frame(width: 420, height: 420)
+                .blur(radius: 100)
+                .offset(x: -190, y: 340)
+                .allowsHitTesting(false)
         }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            AYNMark(size: 52)
+            AYNMark(size: 46)
             VStack(alignment: .leading, spacing: 1) {
                 Text("عَيْن")
-                    .font(.system(size: 31, weight: .black, design: .rounded))
-                if let profile = selectedProfile {
-                    Text(profile.name)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.aynIvory)
+                Text(selectedProfile?.name ?? modeSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(Color.aynIvory.opacity(0.52))
+                    .lineLimit(1)
             }
             Spacer()
-
-            Button { showProfiles = true } label: {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(GlassButtonStyle())
+            headerIcon("tray.full.fill") { showProfiles = true }
+            headerIcon("gearshape.fill") { showSettings = true }
         }
+        .padding(.vertical, 3)
     }
 
-    private var modeDock: some View {
-        HStack(spacing: 6) {
+    private func headerIcon(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 42, height: 42)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.10), lineWidth: 0.7))
+                .foregroundStyle(Color.aynIvory)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var bottomDock: some View {
+        HStack(spacing: 5) {
             ForEach(AYNMode.allCases) { item in
                 Button {
-                    withAnimation(.snappy(duration: 0.24)) { mode = item }
+                    app.clearTransientResults()
+                    withAnimation(.easeInOut(duration: 0.18)) { mode = item }
                 } label: {
-                    VStack(spacing: 5) {
+                    VStack(spacing: 4) {
                         Image(systemName: icon(for: item))
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 16, weight: .semibold))
                         Text(item.rawValue)
-                            .font(.caption2.bold())
+                            .font(.caption2.weight(.semibold))
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .foregroundStyle(mode == item ? .black : .white)
+                    .frame(height: 55)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(GlassButtonStyle(prominent: mode == item))
+                .buttonStyle(AYNPressStyle(selected: mode == item))
             }
         }
+        .padding(7)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 25).stroke(.white.opacity(0.11), lineWidth: 0.7) }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 5)
+        .shadow(color: .black.opacity(0.30), radius: 24, y: 12)
     }
 
-    @ViewBuilder
-    private var modeContent: some View {
+    @ViewBuilder private var modeContent: some View {
         switch mode {
         case .see: seeMode
         case .inspect: inspectMode
@@ -131,21 +158,21 @@ struct RootView: View {
     }
 
     private var seeMode: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 11) {
             mediaHero
             mediaButtons
         }
     }
 
     private var inspectMode: some View {
-        VStack(spacing: 12) {
-            compactTitle("فحص", icon: "scope")
+        VStack(spacing: 11) {
+            titleLine("افحص", detail: "قبل وبعد أو لقطة إضافية")
             mediaButtons
 
             PhotosPicker(selection: $compareItems, maxSelectionCount: 6, matching: .images) {
-                glassAction(
-                    title: "قبل / بعد",
-                    subtitle: compareImages.count >= 2 ? "\(compareImages.count) صور جاهزة" : "اختر صورتين أو أكثر",
+                rowAction(
+                    title: "مقارنة صور",
+                    value: compareImages.count >= 2 ? "\(compareImages.count) جاهزة" : "قبل / بعد",
                     icon: "rectangle.2.swap"
                 )
             }
@@ -153,27 +180,15 @@ struct RootView: View {
 
             if compareImages.count >= 2 {
                 Button {
-                    Task {
-                        await app.compare(
-                            images: compareImages,
-                            prompt: "قارن الصور بالترتيب وحدد التغيرات المهمة فقط، وهل يوجد تحسن أو تدهور واضح."
-                        )
-                    }
-                } label: {
-                    primaryAction("ابدأ المقارنة", icon: "arrow.triangle.2.circlepath")
-                }
+                    Task { await app.compare(images: compareImages, prompt: "قارن الصور بالترتيب. اذكر التغيرات المهمة فقط وهل يوجد تحسن أو تدهور.") }
+                } label: { solidAction("ابدأ المقارنة", icon: "arrow.triangle.2.circlepath") }
                 .buttonStyle(.plain)
-                .disabled(app.isAnalyzing)
             }
 
             Button {
                 Task { await app.nextGuidedStep(mode: "فحص عام") }
             } label: {
-                glassAction(
-                    title: "اللقطة التالية",
-                    subtitle: app.analysis == nil ? "تظهر بعد أول تحليل" : "خل عَيْن يطلب لقطة واحدة مفيدة",
-                    icon: "camera.metering.center.weighted"
-                )
+                rowAction(title: "لقطة أدق", value: app.analysis == nil ? "بعد أول تحليل" : "وش أصوّر بعد؟", icon: "camera.viewfinder")
             }
             .buttonStyle(.plain)
             .disabled(app.analysis == nil || app.isAnalyzing)
@@ -181,71 +196,51 @@ struct RootView: View {
     }
 
     private var carMode: some View {
-        VStack(spacing: 12) {
-            compactTitle("السيارة", icon: "car.fill")
+        VStack(spacing: 11) {
+            titleLine("السيارة", detail: "صورة، صوت، وبيانات OBD")
+            mediaButtons
 
             HStack(spacing: 9) {
-                Button { showOBD = true } label: {
-                    compactGlassButton("OBD", icon: "cable.connector")
-                }
-                .buttonStyle(.plain)
-
+                Button { showOBD = true } label: { smallAction("OBD", icon: "cable.connector") }
+                    .buttonStyle(.plain)
                 PhotosPicker(selection: $videoItem, matching: .videos) {
-                    compactGlassButton("فيديو", icon: "video.fill")
+                    smallAction("صوت / فيديو", icon: "waveform")
                 }
                 .buttonStyle(.plain)
             }
 
-            mediaButtons
-
-            GlassPanel {
+            AYNPanel {
                 VStack(alignment: .leading, spacing: 10) {
                     TextField("وش قال الفني؟", text: $technicianText, axis: .vertical)
+                        .lineLimit(2...4)
                         .textFieldStyle(.plain)
-                        .lineLimit(2...5)
-
+                        .foregroundStyle(Color.aynIvory)
                     if !technicianText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button {
                             Task { await app.reviewTechnician(technicianText) }
-                        } label: {
-                            primaryAction("راجع التشخيص", icon: "checkmark.seal.fill")
-                        }
+                        } label: { solidAction("راجع كلامه", icon: "checkmark.seal") }
                         .buttonStyle(.plain)
-                        .disabled(app.isAnalyzing)
                     }
                 }
             }
-
-            Button {
-                Task { await app.nextGuidedStep(mode: "تشخيص سيارة") }
-            } label: {
-                glassAction(
-                    title: "فحص موجه",
-                    subtitle: app.analysis == nil ? "حلّل صورة أو فيديو أولًا" : "خطوة واحدة لزيادة دقة التشخيص",
-                    icon: "checklist"
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(app.analysis == nil || app.isAnalyzing)
         }
     }
 
     private var askMode: some View {
-        VStack(spacing: 12) {
-            compactTitle("اسأل أي شيء", icon: "sparkles")
-
-            GlassPanel {
+        VStack(spacing: 11) {
+            titleLine("اسأل", detail: "سؤال عادي أو عن آخر تحليل")
+            AYNPanel {
                 VStack(spacing: 12) {
-                    TextField("اكتب سؤالك…", text: $question, axis: .vertical)
+                    TextField("اكتب أي سؤال…", text: $question, axis: .vertical)
+                        .lineLimit(3...8)
                         .textFieldStyle(.plain)
-                        .lineLimit(2...7)
                         .font(.body)
-
+                        .foregroundStyle(Color.aynIvory)
                     HStack {
                         if app.analysis != nil || app.obd.lastResult != nil {
-                            Toggle("استخدم التحليل الحالي", isOn: $useCurrentContext)
+                            Toggle("استخدم السياق", isOn: $useCurrentContext)
                                 .font(.caption)
-                                .toggleStyle(.switch)
+                                .tint(Color.aynLime)
                         }
                         Spacer()
                         Button {
@@ -255,346 +250,303 @@ struct RootView: View {
                             Task { await app.ask(q, useCurrentContext: useCurrentContext) }
                         } label: {
                             Image(systemName: "arrow.up")
-                                .font(.system(size: 16, weight: .black))
+                                .font(.system(size: 15, weight: .black))
                                 .frame(width: 42, height: 42)
+                                .background(Color.aynLime, in: Circle())
+                                .foregroundStyle(Color.aynGraphite)
+                                .contentShape(Circle())
                         }
-                        .buttonStyle(GlassButtonStyle(prominent: true))
+                        .buttonStyle(.plain)
                         .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || app.isAnalyzing)
                     }
                 }
             }
 
             if app.analysis != nil {
-                HStack(spacing: 8) {
-                    quickAsk("هل هذا طبيعي؟")
-                    quickAsk("وش أفحص بعد؟")
-                    quickAsk("اشرحه أبسط")
+                HStack(spacing: 7) {
+                    quickAsk("اشرح أبسط")
+                    quickAsk("وش أفحص؟")
+                    quickAsk("هل طبيعي؟")
                 }
             }
         }
     }
 
     private var mediaHero: some View {
-        ZStack(alignment: .bottom) {
+        ZStack(alignment: .bottomTrailing) {
             Group {
                 if let data = app.selectedImageData, let image = UIImage(data: data) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
+                    Image(uiImage: image).resizable().scaledToFill()
                 } else {
                     ZStack {
-                        LinearGradient(colors: [.white.opacity(0.08), .cyan.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        VStack(spacing: 14) {
-                            AYNMark(size: 88)
-                            Text("شوف أكثر")
-                                .font(.title3.bold())
-                            Text("صوّر أو اختر صورة")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        Color.aynGraphite2
+                        VStack(spacing: 12) {
+                            Image(systemName: "camera.aperture")
+                                .font(.system(size: 46, weight: .light))
+                                .foregroundStyle(Color.aynLime)
+                            Text("صوّر شيء")
+                                .font(.headline)
+                                .foregroundStyle(Color.aynIvory)
                         }
                     }
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 330)
+            .frame(height: 285)
             .clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 30, style: .continuous)
-                    .stroke(.white.opacity(0.16), lineWidth: 0.8)
-            }
+            .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 27).stroke(.white.opacity(0.12), lineWidth: 0.8) }
 
             if app.selectedImageData != nil {
-                HStack {
-                    Text(app.selectedMediaKind.isEmpty ? "جاهز" : app.selectedMediaKind)
-                    Spacer()
-                    Button("مسح") { app.reset() }
-                        .buttonStyle(.plain)
+                Button {
+                    app.reset()
+                } label: {
+                    Label("مسح", systemImage: "xmark")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .background(.regularMaterial, in: Capsule())
+                        .foregroundStyle(Color.aynIvory)
                 }
-                .font(.caption.bold())
-                .padding(.horizontal, 15)
-                .frame(height: 46)
-                .background(.ultraThinMaterial)
-                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 30, bottomTrailingRadius: 30))
+                .buttonStyle(.plain)
+                .padding(12)
             }
         }
-        .shadow(color: .black.opacity(0.24), radius: 22, y: 10)
     }
 
     private var mediaButtons: some View {
-        HStack(spacing: 9) {
-            Button { showCamera = true } label: {
-                mediaButton("كاميرا", icon: "camera.fill", primary: true)
-            }
-            .buttonStyle(.plain)
-
-            PhotosPicker(selection: $photoItem, matching: .images) {
-                mediaButton("صورة", icon: "photo.fill", primary: false)
-            }
-            .buttonStyle(.plain)
-
-            PhotosPicker(selection: $videoItem, matching: .videos) {
-                mediaButton("فيديو", icon: "video.fill", primary: false)
-            }
-            .buttonStyle(.plain)
+        HStack(spacing: 8) {
+            Button { showCamera = true } label: { mediaButton("كاميرا", "camera.fill", accent: true) }
+                .buttonStyle(.plain)
+            PhotosPicker(selection: $photoItem, matching: .images) { mediaButton("صورة", "photo.fill", accent: false) }
+                .buttonStyle(.plain)
+            PhotosPicker(selection: $videoItem, matching: .videos) { mediaButton("فيديو", "video.fill", accent: false) }
+                .buttonStyle(.plain)
         }
-        .disabled(isLoadingMedia || app.isAnalyzing)
     }
 
-    private func mediaButton(_ title: String, icon: String, primary: Bool) -> some View {
+    private func mediaButton(_ title: String, _ icon: String, accent: Bool) -> some View {
         Label(title, systemImage: icon)
-            .font(.subheadline.bold())
+            .font(.subheadline.weight(.semibold))
             .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .foregroundStyle(primary ? .black : .white)
-            .background(
-                primary
-                ? AnyShapeStyle(LinearGradient(colors: [.white, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
-                : AnyShapeStyle(.ultraThinMaterial)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(.white.opacity(0.18), lineWidth: 0.8)
-            }
+            .frame(height: 50)
+            .background(accent ? Color.aynIvory : Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 17))
+            .foregroundStyle(accent ? Color.aynGraphite : Color.aynIvory)
+            .overlay { RoundedRectangle(cornerRadius: 17).stroke(.white.opacity(accent ? 0.22 : 0.10), lineWidth: 0.7) }
+            .contentShape(Rectangle())
     }
 
-    private var loadingBar: some View {
-        GlassPanel {
-            HStack(spacing: 12) {
-                ProgressView().tint(.cyan)
-                Text(isLoadingMedia ? "جاري التجهيز…" : "جاري التحليل…")
-                    .font(.subheadline.bold())
-                Spacer()
-            }
+    private var loadingPill: some View {
+        HStack(spacing: 10) {
+            ProgressView().tint(Color.aynLime)
+            Text(isLoadingMedia ? "جاري تجهيز الوسائط" : "جاري التحليل")
+                .font(.caption.weight(.semibold))
+            Spacer()
         }
+        .foregroundStyle(Color.aynIvory)
+        .padding(.horizontal, 15)
+        .frame(height: 48)
+        .background(.ultraThinMaterial, in: Capsule())
+        .allowsHitTesting(false)
     }
 
     private func resultCard(_ result: VisualAnalysis) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: 16) {
+        AYNPanel(padding: 18) {
+            VStack(alignment: .leading, spacing: 15) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(result.category.uppercased())
-                            .font(.caption2.bold())
-                            .foregroundStyle(.cyan)
+                        Text(result.category)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.aynLime)
                         Text(result.title)
-                            .font(.title2.bold())
+                            .font(.system(size: 27, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.aynIvory)
                         Text(result.summary)
-                            .foregroundStyle(.white.opacity(0.82))
+                            .font(.body)
+                            .foregroundStyle(Color.aynIvory.opacity(0.76))
+                            .lineSpacing(3)
                     }
                     Spacer(minLength: 12)
-                    Text("\(result.confidence)%")
-                        .font(.caption.bold().monospacedDigit())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.white.opacity(0.08), in: Capsule())
+                    VStack(spacing: 1) {
+                        Text("\(result.confidence)%").font(.headline.monospacedDigit())
+                        Text("ثقة").font(.caption2)
+                    }
+                    .foregroundStyle(Color.aynGraphite)
+                    .frame(width: 58, height: 58)
+                    .background(Color.aynLime, in: Circle())
                 }
 
-                if let geo = result.geo, geo.confidence > 0 {
-                    geoCard(geo)
-                }
-
-                if let auto = result.automotive, auto.isVehicleRelated {
-                    automotiveSummary(auto)
-                }
-
-                if !result.keyFacts.isEmpty {
-                    compactList("المهم", items: Array(result.keyFacts.prefix(5)))
-                }
-
-                if !result.visibleDetails.isEmpty {
-                    compactList("من الصورة", items: Array(result.visibleDetails.prefix(5)))
-                }
-
-                if !result.cautions.isEmpty {
-                    compactList("تنبيه", items: Array(result.cautions.prefix(4)), warning: true)
-                }
-
+                if let geo = result.geo, geo.confidence > 0 { geoRow(geo) }
+                if let auto = result.automotive, auto.isVehicleRelated { automotiveRow(auto) }
+                if !result.keyFacts.isEmpty { cleanList(Array(result.keyFacts.prefix(4))) }
+                if !result.cautions.isEmpty { warningList(Array(result.cautions.prefix(3))) }
                 if let uncertainty = result.uncertainty, !uncertainty.isEmpty {
                     Text(uncertainty)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.aynIvory.opacity(0.45))
                 }
             }
         }
     }
 
-    private func geoCard(_ geo: GeoEstimate) -> some View {
-        let place = [geo.landmark, geo.area, geo.city, geo.country]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: "، ")
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("المكان المحتمل", systemImage: "location.fill")
-                    .font(.headline)
-                Spacer()
-                Text("\(geo.confidence)%")
-                    .font(.caption.bold().monospacedDigit())
-                    .foregroundStyle(.cyan)
+    private func geoRow(_ geo: GeoEstimate) -> some View {
+        let place = [geo.landmark, geo.area, geo.city, geo.country].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "، ")
+        return HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "location.fill").foregroundStyle(Color.aynClay)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(place.isEmpty ? "مكان محتمل" : place).font(.subheadline.bold())
+                if !geo.evidence.isEmpty {
+                    Text(geo.evidence.prefix(2).joined(separator: " • ")).font(.caption).foregroundStyle(Color.aynIvory.opacity(0.48))
+                }
             }
-            if !place.isEmpty { Text(place).font(.subheadline.bold()) }
-            if !geo.evidence.isEmpty {
-                Text(geo.evidence.prefix(3).joined(separator: " • "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Spacer()
+            Text("\(geo.confidence)%").font(.caption.bold().monospacedDigit()).foregroundStyle(Color.aynClay)
         }
+        .foregroundStyle(Color.aynIvory)
         .padding(13)
-        .background(.cyan.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.aynClay.opacity(0.09), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private func automotiveSummary(_ a: AutomotiveDiagnostic) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(a.probableSystem ?? "تشخيص السيارة", systemImage: "car.badge.gearshape.fill")
-                    .font(.headline)
-                Spacer()
-                if let drive = a.canDrive { Text(drive).font(.caption.bold()).foregroundStyle(drive == "لا" ? .red : .orange) }
+    private func automotiveRow(_ a: AutomotiveDiagnostic) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: "car.fill").foregroundStyle(Color.aynLime)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(a.probableSystem ?? "تشخيص السيارة").font(.subheadline.bold())
+                if let cause = a.likelyCauses.first { Text("الأرجح: \(cause.cause) · \(cause.probability)%").font(.caption).foregroundStyle(Color.aynIvory.opacity(0.56)) }
+                if let check = a.checks.first { Text("ابدأ بـ: \(check)").font(.caption).foregroundStyle(Color.aynIvory.opacity(0.56)) }
             }
-            if let top = a.likelyCauses.first {
-                Text("الأرجح: \(top.cause) · \(top.probability)%")
-                    .font(.subheadline.bold())
-            }
-            if let firstCheck = a.checks.first {
-                Text("ابدأ بـ: \(firstCheck)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            Spacer()
+            if let drive = a.canDrive { Text(drive).font(.caption.bold()).foregroundStyle(drive == "لا" ? Color.aynClay : Color.aynLime) }
         }
+        .foregroundStyle(Color.aynIvory)
         .padding(13)
-        .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.aynLime.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
     }
 
-    private func compactList(_ title: String, items: [String], warning: Bool = false) -> some View {
+    private func cleanList(_ items: [String]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(warning ? .orange : .white)
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .top, spacing: 8) {
-                    Circle()
-                        .fill(warning ? Color.orange : Color.cyan)
-                        .frame(width: 5, height: 5)
-                        .padding(.top, 7)
-                    Text(item)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.80))
+                HStack(alignment: .top, spacing: 9) {
+                    RoundedRectangle(cornerRadius: 2).fill(Color.aynLime).frame(width: 5, height: 5).padding(.top, 7)
+                    Text(item).font(.subheadline).foregroundStyle(Color.aynIvory.opacity(0.78))
+                }
+            }
+        }
+    }
+
+    private func warningList(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "exclamationmark.circle.fill").font(.caption).foregroundStyle(Color.aynClay).padding(.top, 2)
+                    Text(item).font(.subheadline).foregroundStyle(Color.aynIvory.opacity(0.76))
                 }
             }
         }
     }
 
     private func answerCard(_ text: String) -> some View {
-        simpleTextCard("عَيْن", icon: "sparkles", text: text)
+        noteCard(title: "عَيْن", icon: "bubble.left.fill", text: text)
     }
 
     private func guidedCard(_ text: String) -> some View {
-        GlassPanel {
+        AYNPanel {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "camera.fill")
-                    .foregroundStyle(.cyan)
+                Image(systemName: "camera.viewfinder").foregroundStyle(Color.aynLime)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(text)
-                    Button { showCamera = true } label: {
-                        Text("افتح الكاميرا")
-                            .font(.caption.bold())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.cyan)
+                    Text(text).foregroundStyle(Color.aynIvory)
+                    Button { showCamera = true } label: { Text("افتح الكاميرا").font(.caption.bold()).foregroundStyle(Color.aynGraphite).padding(.horizontal, 12).frame(height: 34).background(Color.aynLime, in: Capsule()) }
+                        .buttonStyle(.plain)
                 }
                 Spacer()
             }
         }
     }
 
-    private func simpleTextCard(_ title: String, icon: String, text: String) -> some View {
-        GlassPanel {
+    private func noteCard(title: String, icon: String, text: String) -> some View {
+        AYNPanel {
             VStack(alignment: .leading, spacing: 9) {
-                Label(title, systemImage: icon)
-                    .font(.headline)
-                    .foregroundStyle(.cyan)
-                Text(text)
-                    .textSelection(.enabled)
+                Label(title, systemImage: icon).font(.headline).foregroundStyle(Color.aynLime)
+                Text(text).foregroundStyle(Color.aynIvory.opacity(0.82)).textSelection(.enabled)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private func errorCard(_ message: String) -> some View {
-        GlassPanel {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                Text(message)
-                    .font(.subheadline)
-                Spacer()
-            }
-        }
-    }
-
-    private func compactTitle(_ title: String, icon: String) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon).foregroundStyle(.cyan)
-            Text(title).font(.title3.bold())
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.aynClay)
+            Text(message).font(.subheadline).foregroundStyle(Color.aynIvory.opacity(0.8))
             Spacer()
         }
+        .padding(15)
+        .background(Color.aynClay.opacity(0.10), in: RoundedRectangle(cornerRadius: 18))
     }
 
-    private func glassAction(title: String, subtitle: String, icon: String) -> some View {
-        GlassPanel {
-            HStack(spacing: 13) {
-                Image(systemName: icon)
-                    .font(.title3.bold())
-                    .foregroundStyle(.cyan)
-                    .frame(width: 40, height: 40)
-                    .background(.cyan.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.headline)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.left").foregroundStyle(.secondary)
-            }
+    private func titleLine(_ title: String, detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.title2.bold()).foregroundStyle(Color.aynIvory)
+            Spacer()
+            Text(detail).font(.caption).foregroundStyle(Color.aynIvory.opacity(0.42))
         }
     }
 
-    private func compactGlassButton(_ title: String, icon: String) -> some View {
-        Label(title, systemImage: icon)
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .frame(height: 54)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.16), lineWidth: 0.8) }
+    private func rowAction(title: String, value: String, icon: String) -> some View {
+        AYNPanel {
+            HStack(spacing: 12) {
+                Image(systemName: icon).foregroundStyle(Color.aynLime).frame(width: 32)
+                Text(title).font(.headline).foregroundStyle(Color.aynIvory)
+                Spacer()
+                Text(value).font(.caption).foregroundStyle(Color.aynIvory.opacity(0.46))
+                Image(systemName: "chevron.left").font(.caption).foregroundStyle(Color.aynIvory.opacity(0.35))
+            }
+            .contentShape(Rectangle())
+        }
     }
 
-    private func primaryAction(_ title: String, icon: String) -> some View {
+    private func smallAction(_ title: String, icon: String) -> some View {
+        Label(title, systemImage: icon)
+            .font(.subheadline.bold())
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .foregroundStyle(Color.aynIvory)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 17))
+            .overlay { RoundedRectangle(cornerRadius: 17).stroke(.white.opacity(0.10), lineWidth: 0.7) }
+            .contentShape(Rectangle())
+    }
+
+    private func solidAction(_ title: String, icon: String) -> some View {
         Label(title, systemImage: icon)
             .font(.headline)
             .frame(maxWidth: .infinity)
             .frame(height: 50)
-            .foregroundStyle(.black)
-            .background(
-                LinearGradient(colors: [.white, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
+            .background(Color.aynLime, in: RoundedRectangle(cornerRadius: 16))
+            .foregroundStyle(Color.aynGraphite)
+            .contentShape(Rectangle())
     }
 
     private func quickAsk(_ text: String) -> some View {
-        Button {
-            Task { await app.ask(text, useCurrentContext: true) }
-        } label: {
+        Button { Task { await app.ask(text, useCurrentContext: true) } } label: {
             Text(text)
                 .font(.caption.bold())
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
+                .padding(.vertical, 10)
                 .background(.ultraThinMaterial, in: Capsule())
+                .foregroundStyle(Color.aynIvory)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(app.isAnalyzing)
+    }
+
+    private var modeSubtitle: String {
+        switch mode {
+        case .see: return "شوف اللي قدامك"
+        case .inspect: return "قارن وافحص"
+        case .car: return "تشخيص السيارة"
+        case .ask: return "اسأل أي شيء"
+        }
     }
 
     private func icon(for mode: AYNMode) -> String {
@@ -627,15 +579,12 @@ struct RootView: View {
                                         Text(profile.kind).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    if app.selectedProfileID == profile.id {
-                                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan)
-                                    }
+                                    if app.selectedProfileID == profile.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.aynLime) }
                                 }
                             }
                         }
                     }
                 }
-
                 Section("ملف جديد") {
                     TextField("مثال: يوكن 2013", text: $newProfileName)
                     Button("إضافة") {
@@ -648,84 +597,53 @@ struct RootView: View {
                     }
                     .disabled(newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-
                 if app.selectedProfileID != nil {
-                    Section {
-                        Button("بدون ملف") {
-                            app.selectedProfileID = nil
-                            showProfiles = false
-                        }
-                    }
+                    Section { Button("بدون ملف") { app.selectedProfileID = nil; showProfiles = false } }
                 }
             }
             .navigationTitle("الملفات")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("تم") { showProfiles = false }
-                }
-            }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("تم") { showProfiles = false } } }
         }
         .presentationDetents([.medium, .large])
     }
 
-    @MainActor
-    private func loadPhoto(_ item: PhotosPickerItem) async {
+    @MainActor private func loadPhoto(_ item: PhotosPickerItem) async {
+        guard !isLoadingMedia else { return }
         isLoadingMedia = true
-        defer {
-            isLoadingMedia = false
-            photoItem = nil
-        }
+        defer { isLoadingMedia = false; photoItem = nil }
         do {
-            guard let rawData = try await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: rawData),
-                  let data = ImageCompressor.jpegData(from: image) else {
+            guard let rawData = try await item.loadTransferable(type: Data.self), let image = UIImage(data: rawData), let data = ImageCompressor.jpegData(from: image) else {
                 app.errorMessage = "تعذر فتح الصورة."
                 return
             }
             app.selectedImageData = data
             await app.analyze(imageData: data)
-        } catch {
-            app.errorMessage = "تعذر فتح الصورة: \(error.localizedDescription)"
-        }
+        } catch { app.errorMessage = "تعذر فتح الصورة: \(error.localizedDescription)" }
     }
 
-    @MainActor
-    private func loadVideo(_ item: PhotosPickerItem) async {
+    @MainActor private func loadVideo(_ item: PhotosPickerItem) async {
+        guard !isLoadingMedia else { return }
         isLoadingMedia = true
-        defer {
-            isLoadingMedia = false
-            videoItem = nil
-        }
+        defer { isLoadingMedia = false; videoItem = nil }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else {
-                app.errorMessage = "تعذر فتح الفيديو."
-                return
-            }
+            guard let data = try await item.loadTransferable(type: Data.self) else { app.errorMessage = "تعذر فتح الفيديو."; return }
             await app.analyzeVideo(data: data)
-        } catch {
-            app.errorMessage = "تعذر فتح الفيديو: \(error.localizedDescription)"
-        }
+        } catch { app.errorMessage = "تعذر فتح الفيديو: \(error.localizedDescription)" }
     }
 
-    @MainActor
-    private func loadCompare(_ items: [PhotosPickerItem]) async {
+    @MainActor private func loadCompare(_ items: [PhotosPickerItem]) async {
+        guard !isLoadingMedia else { return }
         isLoadingMedia = true
         compareImages = []
         defer { isLoadingMedia = false }
-
         for item in items.prefix(6) {
-            guard let raw = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: raw),
-                  let data = ImageCompressor.jpegData(from: image) else { continue }
+            guard let raw = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: raw), let data = ImageCompressor.jpegData(from: image) else { continue }
             compareImages.append(data)
         }
     }
 
     private func handleImage(_ image: UIImage) {
-        guard let data = ImageCompressor.jpegData(from: image) else {
-            app.errorMessage = "تعذر تجهيز الصورة."
-            return
-        }
+        guard let data = ImageCompressor.jpegData(from: image) else { app.errorMessage = "تعذر تجهيز الصورة."; return }
         app.selectedImageData = data
         Task { await app.analyze(imageData: data) }
     }
