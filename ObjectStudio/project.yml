@@ -9,14 +9,22 @@ settings:
     CODE_SIGNING_ALLOWED: NO
     CODE_SIGNING_REQUIRED: NO
     CODE_SIGN_IDENTITY: ''
+packages:
+  GLTFKit2:
+    url: https://github.com/warrenm/GLTFKit2.git
+    exactVersion: 0.5.15
 targets:
   ObjectStudio:
     type: application
     platform: iOS
+    dependencies:
+      - package: GLTFKit2
     sources:
       - ObjectStudio
     settings:
       base:
+        MARKETING_VERSION: 2.0.0
+        CURRENT_PROJECT_VERSION: 20
         PRODUCT_BUNDLE_IDENTIFIER: com.fahad.objectstudio
         TARGETED_DEVICE_FAMILY: '1,2'
         SUPPORTS_MACCATALYST: NO
@@ -30,4 +38,16 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: ''
     scheme:
-      testTargets: []
+      testTargets:
+        - ObjectStudioTests
+
+  ObjectStudioTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ObjectStudioTests
+    dependencies:
+      - target: ObjectStudio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

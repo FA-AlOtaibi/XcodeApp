@@ -1,36 +1,35 @@
 import Foundation
-import ModelIO
+import SceneKit
+import GLTFKit2
 
 struct USDZConverter {
-    enum ConversionError: LocalizedError {
-        case unsupportedInput(String)
-        case unsupportedOutput
-
-        var errorDescription: String? {
-            switch self {
-            case .unsupportedInput(let ext): return "صيغة \(ext.uppercased()) لا يمكن تحويلها محليًا إلى USDZ على هذا الجهاز."
-            case .unsupportedOutput: return "هذا إصدار iOS لا يدعم تصدير USDZ عبر Model I/O."
+    static func loadScene(_ url: URL) async throws -> SCNScene {
+        if ["glb", "gltf"].contains(url.pathExtension.lowercased()) {
+            return try await withCheckedThrowingContinuation { continuation in
+                GLTFAsset.load(with: url, options: [:]) { _, status, asset, error, _ in
+                    if status == .error {
+                        continuation.resume(throwing: error ?? GradioClient.ClientError.missingOutput)
+                    } else if status == .complete {
+                        guard let asset else {
+                            continuation.resume(throwing: GradioClient.ClientError.missingOutput)
+                            return
+                        }
+                        continuation.resume(returning: SCNScene(gltfAsset: asset))
+                    }
+                }
             }
         }
+        return try SCNScene(url: url, options: nil)
     }
 
-    static func convertToUSDZ(_ sourceURL: URL) throws -> URL {
-        let ext = sourceURL.pathExtension.lowercased()
-        if ext == "usdz" { return sourceURL }
-        guard MDLAsset.canImportFileExtension(ext) else {
-            throw ConversionError.unsupportedInput(ext)
+    static func convertToUSDZ(_ sourceURL: URL) async throws -> URL {
+        if sourceURL.pathExtension.lowercased() == "usdz" { return sourceURL }
+        let scene = try await loadScene(sourceURL)
+        let output = sourceURL.deletingPathExtension().appendingPathExtension("usdz")
+        guard scene.write(to: output, options: nil, delegate: nil, progressHandler: nil),
+              let size = try output.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else {
+            throw GradioClient.ClientError.server("لم ينجح تصدير USDZ. بقي ملف المجسم الأصلي محفوظًا.")
         }
-        guard MDLAsset.canExportFileExtension("usdz") else {
-            throw ConversionError.unsupportedOutput
-        }
-
-        let asset = MDLAsset(url: sourceURL)
-        asset.loadTextures()
-        let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ObjectStudio-\(UUID().uuidString)")
-            .appendingPathExtension("usdz")
-        try? FileManager.default.removeItem(at: out)
-        try asset.export(to: out)
-        return out
+        return output
     }
 }

@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var show3D = false
     @State private var showAR = false
+    @State private var workspace = 0
 
     var body: some View {
         NavigationStack {
@@ -19,11 +20,21 @@ struct ContentView: View {
                         header
                         hero
                         if processor.source != nil {
-                            localStudio
-                            aiTools
-                            if let depth = hf.depthImage { depthSection(depth) }
-                            if !hf.angleImages.isEmpty { angleSection }
-                            if let model = hf.modelURL { modelSection(model) }
+                            Picker("مساحة العمل", selection: $workspace) {
+                                Text("الصورة").tag(0)
+                                Text("الإنشاء").tag(1)
+                                Text("النتائج").tag(2)
+                            }.pickerStyle(.segmented)
+                            if workspace == 0 { localStudio }
+                            if workspace == 1 { aiTools }
+                            if workspace == 2 {
+                                if let depth = hf.depthImage { depthSection(depth) }
+                                if !hf.angleImages.isEmpty { angleSection }
+                                if let model = hf.modelURL { modelSection(model) }
+                                if hf.depthImage == nil && hf.angleImages.isEmpty && hf.modelURL == nil {
+                                    ContentUnavailableView("نتائجك تظهر هنا", systemImage: "cube.transparent", description: Text("اختر أداة من تبويب الإنشاء للبدء."))
+                                }
+                            }
                         }
                         if let error = hf.errorMessage ?? processor.errorMessage { errorCard(error) }
                     }
@@ -34,6 +45,18 @@ struct ContentView: View {
             .toolbar(.hidden, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .tint(Color(red: 0.72, green: 0.83, blue: 0.70))
+        .safeAreaInset(edge: .bottom) {
+            if hf.isBusy {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text(hf.progressText).font(.footnote).frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(18).background(.ultraThinMaterial)
+            }
+        }
+        .onChange(of: hf.isBusy) { _, busy in
+            if !busy && (hf.modelURL != nil || hf.depthImage != nil || !hf.angleImages.isEmpty) { workspace = 2 }
+        }
         .sheet(isPresented: $showSettings) { SettingsView(service: hf) }
         .sheet(isPresented: $show3D) {
             if let url = hf.modelURL {
@@ -71,7 +94,7 @@ struct ContentView: View {
             .frame(width: 46, height: 46)
             VStack(alignment: .leading, spacing: 1) {
                 Text("OBJECT STUDIO").font(.system(size: 19, weight: .black, design: .rounded)).tracking(1.3)
-                Text("Product imaging, angles, 3D & AR").font(.caption).foregroundStyle(.secondary)
+                Text("مساحة منتجك • الإصدار 2.0").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button { showSettings = true } label: {
@@ -109,10 +132,10 @@ struct ContentView: View {
                         Text(processor.isProcessing ? "نجهز المنتج…" : hf.progressText)
                             .font(.subheadline.bold()).multilineTextAlignment(.center).padding(.horizontal, 24)
                     }
-                    .padding(.bottom, 130)
+                    .padding(.bottom, 65)
                 }
             }
-            .frame(height: 370)
+            .frame(height: processor.source == nil ? 300 : 190)
             PhotosPicker(selection: $pickerItem, matching: .images) {
                 HStack {
                     Image(systemName: processor.source == nil ? "photo.badge.plus" : "arrow.triangle.2.circlepath.camera")
@@ -154,7 +177,7 @@ struct ContentView: View {
     }
 
     private var aiTools: some View {
-        sectionCard(title: "AI Lab", subtitle: "Hugging Face — يستخدم حسابك وحصتك") {
+        sectionCard(title: "اصنع بُعدًا جديدًا", subtitle: "اختر النتيجة التي تريدها لصورتك") {
             VStack(spacing: 11) {
                 aiButton(icon: "square.3.layers.3d.down.right", title: "Depth Map", subtitle: "Depth Anything V2", action: {
                     guard let image = processor.source else { return }; Task { await hf.generateDepth(from: image) }
@@ -162,10 +185,10 @@ struct ContentView: View {
                 aiButton(icon: "camera.rotate", title: "4 زوايا جديدة", subtitle: "Qwen Image Edit — ±45° و ±90°", action: {
                     guard let image = processor.transparent ?? processor.source else { return }; Task { await hf.generateAngles(from: image) }
                 })
-                aiButton(icon: "cube.fill", title: "إنشاء مجسم 3D", subtitle: "Hunyuan3D 2.1 — مجسم وخامات", badge: "GPU", action: {
+                aiButton(icon: "cube.fill", title: "إنشاء مجسم 3D", subtitle: "Hunyuan3D — مجسم وخامات", badge: "GPU", action: {
                     guard let image = processor.transparent ?? processor.source else { return }; Task { await hf.generate3D(from: image, textured: true) }
                 })
-                aiButton(icon: "arkit", title: "USDZ + AR Quick Look", subtitle: "إنشاء نسخة متوافقة مع واقع آبل المعزز", badge: "AR", action: {
+                aiButton(icon: "arkit", title: "USDZ + AR Quick Look", subtitle: "تحويل المجسم المحفوظ إلى USDZ وفتحه في مكانك", badge: "AR", action: {
                     guard let image = processor.transparent ?? processor.source else { return }
                     Task {
                         await hf.generateARUSDZ(from: image)
@@ -323,7 +346,7 @@ private struct SettingsView: View {
                 Section("Advanced endpoints") {
                     TextField("Qwen Space", text: $service.qwenHost).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("Hunyuan3D Space", text: $service.hunyuanHost).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("Depth model", text: $service.depthModel).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Depth Space", text: $service.depthHost).textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
                 Section {
                     Link("إنشاء Hugging Face Token", destination: URL(string: "https://huggingface.co/settings/tokens")!)

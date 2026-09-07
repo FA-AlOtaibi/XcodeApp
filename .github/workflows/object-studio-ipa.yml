@@ -18,6 +18,14 @@ jobs:
       - name: Generate Xcode project
         working-directory: ObjectStudio
         run: xcodegen generate
+      - name: Test network regressions on simulator
+        working-directory: ObjectStudio
+        run: |
+          set -o pipefail
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for k,vs in d["devices"].items() if "iOS" in k for v in vs if "iPhone" in v["name"]))')
+          xcodebuild -project ObjectStudio.xcodeproj -scheme ObjectStudio \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
       - name: Build unsigned app
         working-directory: ObjectStudio
         run: |
