@@ -28,7 +28,8 @@ final class OBDService: ObservableObject {
         status = "جاري الاتصال بـ OBD…"
         defer { isBusy = false }
         do {
-            let conn = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+            guard let nwPort = NWEndpoint.Port(rawValue: port) else { throw URLError(.badURL) }
+            let conn = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
             connection = conn
             try await start(conn)
             status = "متصل — تهيئة ELM327"
@@ -83,14 +84,15 @@ final class OBDService: ObservableObject {
     }
 
     private func start(_ conn: NWConnection) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            var resumed = false
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    if !resumed { resumed = true; continuation.resume() }
+                    conn.stateUpdateHandler = nil
+                    continuation.resume()
                 case .failed(let error):
-                    if !resumed { resumed = true; continuation.resume(throwing: error) }
+                    conn.stateUpdateHandler = nil
+                    continuation.resume(throwing: error)
                 default: break
                 }
             }
@@ -101,7 +103,7 @@ final class OBDService: ObservableObject {
     private func command(_ text: String, wait: Double = 0.35) async throws -> String {
         guard let connection else { throw URLError(.notConnectedToInternet) }
         let data = Data((text + "\r").utf8)
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: data, completion: .contentProcessed { error in
                 if let error { continuation.resume(throwing: error) } else { continuation.resume() }
             })
@@ -113,7 +115,7 @@ final class OBDService: ObservableObject {
     private func receiveUntilPrompt(_ conn: NWConnection) async throws -> String {
         var collected = Data()
         for _ in 0..<8 {
-            let chunk: Data = try await withCheckedThrowingContinuation { continuation in
+            let chunk: Data = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, error in
                     if let error { continuation.resume(throwing: error) }
                     else { continuation.resume(returning: data ?? Data()) }
