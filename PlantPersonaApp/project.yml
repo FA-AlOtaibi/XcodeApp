@@ -17,9 +17,10 @@ targets:
       - path: PlantPersona
         excludes:
           - Resources/Info.plist
-    info:
-      path: PlantPersona/Resources/Info.plist
     settings:
       base:
         PRODUCT_NAME: PlantPersona
         INFOPLIST_FILE: PlantPersona/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        PRODUCT_BUNDLE_IDENTIFIER: com.fahad.PlantPersona
+        TARGETED_DEVICE_FAMILY: 1
