@@ -11,12 +11,13 @@ struct VisualAnalysis: Codable, Equatable {
     let cautions: [String]
     let uncertainty: String?
     let automotive: AutomotiveDiagnostic?
+    let geo: GeoEstimate?
 
     enum CodingKeys: String, CodingKey {
-        case title, category, summary, confidence, keyFacts, visibleDetails, howItWorksOrUsed, cautions, uncertainty, automotive
+        case title, category, summary, confidence, keyFacts, visibleDetails, howItWorksOrUsed, cautions, uncertainty, automotive, geo
     }
 
-    init(title: String, category: String, summary: String, confidence: Int, keyFacts: [String], visibleDetails: [String], howItWorksOrUsed: [String], cautions: [String], uncertainty: String?, automotive: AutomotiveDiagnostic?) {
+    init(title: String, category: String, summary: String, confidence: Int, keyFacts: [String], visibleDetails: [String], howItWorksOrUsed: [String], cautions: [String], uncertainty: String?, automotive: AutomotiveDiagnostic?, geo: GeoEstimate? = nil) {
         self.title = title
         self.category = category
         self.summary = summary
@@ -27,6 +28,7 @@ struct VisualAnalysis: Codable, Equatable {
         self.cautions = cautions
         self.uncertainty = uncertainty
         self.automotive = automotive
+        self.geo = geo
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +43,32 @@ struct VisualAnalysis: Codable, Equatable {
         cautions = try c.decodeIfPresent([String].self, forKey: .cautions) ?? []
         uncertainty = try c.decodeIfPresent(String.self, forKey: .uncertainty)
         automotive = try c.decodeIfPresent(AutomotiveDiagnostic.self, forKey: .automotive)
+        geo = try c.decodeIfPresent(GeoEstimate.self, forKey: .geo)
+    }
+}
+
+struct GeoEstimate: Codable, Equatable {
+    let country: String?
+    let city: String?
+    let area: String?
+    let landmark: String?
+    let confidence: Int
+    let evidence: [String]
+    let latitude: Double?
+    let longitude: Double?
+
+    enum CodingKeys: String, CodingKey { case country, city, area, landmark, confidence, evidence, latitude, longitude }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        country = try c.decodeIfPresent(String.self, forKey: .country)
+        city = try c.decodeIfPresent(String.self, forKey: .city)
+        area = try c.decodeIfPresent(String.self, forKey: .area)
+        landmark = try c.decodeIfPresent(String.self, forKey: .landmark)
+        confidence = max(0, min(100, try c.decodeIfPresent(Int.self, forKey: .confidence) ?? 0))
+        evidence = try c.decodeIfPresent([String].self, forKey: .evidence) ?? []
+        latitude = try c.decodeIfPresent(Double.self, forKey: .latitude)
+        longitude = try c.decodeIfPresent(Double.self, forKey: .longitude)
     }
 }
 
