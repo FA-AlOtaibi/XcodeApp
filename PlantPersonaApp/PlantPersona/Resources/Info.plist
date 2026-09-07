@@ -9,11 +9,12 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>2.0</string>
-    <key>CFBundleVersion</key><string>6</string>
+    <key>CFBundleShortVersionString</key><string>3.0</string>
+    <key>CFBundleVersion</key><string>7</string>
     <key>LSRequiresIPhoneOS</key><true/>
-    <key>NSCameraUsageDescription</key><string>نحتاج الكاميرا لتصوير الأشياء والمشاهد وتحليلها.</string>
-    <key>NSPhotoLibraryUsageDescription</key><string>اختر صورة من مكتبتك لشرح ما يظهر فيها.</string>
+    <key>NSCameraUsageDescription</key><string>نحتاج الكاميرا لتصوير الأشياء والمشاهد والسيارة وتحليلها.</string>
+    <key>NSPhotoLibraryUsageDescription</key><string>اختر صورة أو فيديو من مكتبتك لشرح وتحليل ما يظهر ويسمع فيه.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>يستخدم عَيْن الشبكة المحلية للاتصال بمحول OBD-II من نوع ELM327 عبر Wi‑Fi وقراءة بيانات سيارتك.</string>
     <key>UILaunchScreen</key><dict/>
     <key>UIRequiresFullScreen</key><true/>
     <key>UISupportedInterfaceOrientations</key>
