@@ -1,0 +1,69 @@
+name: Build Plant Persona Unsigned IPA
+
+on:
+  push:
+    branches: [plant-persona]
+    paths:
+      - 'PlantPersonaSource.zip.b64'
+      - '.github/workflows/build-plant-persona-ipa.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decode source archive
+        shell: bash
+        run: |
+          base64 --decode PlantPersonaSource.zip.b64 > PlantPersonaSource.zip
+          unzip -q PlantPersonaSource.zip
+          ls -la PlantPersona
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build unsigned iPhone app
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf DerivedData build.log Payload PlantPersona-Unsigned.ipa
+          xcodebuild \
+            -project 'PlantPersona/PlantPersona.xcodeproj' \
+            -target PlantPersona \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$PWD/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            DEVELOPMENT_TEAM='' \
+            build | tee build.log
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          APP_PATH=$(find DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name 'PlantPersona.app' -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo 'PlantPersona.app not found'
+            find DerivedData/Build/Products -maxdepth 3 -type d -print || true
+            exit 1
+          fi
+          mkdir -p Payload
+          ditto "$APP_PATH" Payload/PlantPersona.app
+          /usr/bin/zip -qry PlantPersona-Unsigned.ipa Payload
+          shasum -a 256 PlantPersona-Unsigned.ipa > PlantPersona-Unsigned.ipa.sha256
+          ls -lh PlantPersona-Unsigned.ipa
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlantPersona-Unsigned-IPA
+          path: |
+            PlantPersona-Unsigned.ipa
+            PlantPersona-Unsigned.ipa.sha256
+            build.log
+          if-no-files-found: error
+          retention-days: 30
