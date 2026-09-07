@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>ar</string>
-    <key>CFBundleDisplayName</key><string>Plant Persona</string>
+    <key>CFBundleDisplayName</key><string>عَيْن</string>
     <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.4</string>
-    <key>CFBundleVersion</key><string>5</string>
+    <key>CFBundleShortVersionString</key><string>2.0</string>
+    <key>CFBundleVersion</key><string>6</string>
     <key>LSRequiresIPhoneOS</key><true/>
-    <key>NSCameraUsageDescription</key><string>نحتاج الكاميرا لتصوير النبتة وتحليل حالتها.</string>
-    <key>NSPhotoLibraryUsageDescription</key><string>اختر صورة نبتة من مكتبة الصور لتحليلها.</string>
+    <key>NSCameraUsageDescription</key><string>نحتاج الكاميرا لتصوير الأشياء والمشاهد وتحليلها.</string>
+    <key>NSPhotoLibraryUsageDescription</key><string>اختر صورة من مكتبتك لشرح ما يظهر فيها.</string>
     <key>UILaunchScreen</key><dict/>
     <key>UIRequiresFullScreen</key><true/>
     <key>UISupportedInterfaceOrientations</key>
