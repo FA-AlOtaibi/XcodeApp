@@ -33,7 +33,7 @@ jobs:
           rm -rf DerivedData build.log Payload PlantPersona-Unsigned.ipa PlantPersona-Unsigned.ipa.sha256
           xcodebuild \
             -project PlantPersona.xcodeproj \
-            -target PlantPersona \
+            -scheme PlantPersona \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath "$PWD/DerivedData" \
