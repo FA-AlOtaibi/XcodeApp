@@ -1,12 +1,12 @@
 import SwiftUI
 
 struct HistoryView: View {
-    @EnvironmentObject private var app: AppState
+    @ObservedObject var history: PlantHistoryStore
 
     var body: some View {
         NavigationStack {
             Group {
-                if app.history.entries.isEmpty {
+                if history.entries.isEmpty {
                     ContentUnavailableView(
                         "ما عندك سجل حتى الآن",
                         systemImage: "leaf.circle",
@@ -14,7 +14,7 @@ struct HistoryView: View {
                     )
                 } else {
                     List {
-                        ForEach(app.history.entries) { entry in
+                        ForEach(history.entries) { entry in
                             VStack(alignment: .leading, spacing: 10) {
                                 HStack {
                                     Text(entry.diagnosis.plantName)
@@ -41,16 +41,16 @@ struct HistoryView: View {
                             }
                             .padding(.vertical, 8)
                         }
-                        .onDelete(perform: app.history.remove)
+                        .onDelete(perform: history.remove)
                     }
                     .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle("سجل نباتاتي")
             .toolbar {
-                if !app.history.entries.isEmpty {
+                if !history.entries.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("مسح الكل", role: .destructive) { app.history.clear() }
+                        Button("مسح الكل", role: .destructive) { history.clear() }
                     }
                 }
             }
