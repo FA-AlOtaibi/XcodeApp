@@ -9,8 +9,8 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>3.0</string>
-    <key>CFBundleVersion</key><string>7</string>
+    <key>CFBundleShortVersionString</key><string>3.1</string>
+    <key>CFBundleVersion</key><string>8</string>
     <key>LSRequiresIPhoneOS</key><true/>
     <key>NSCameraUsageDescription</key><string>نحتاج الكاميرا لتصوير الأشياء والمشاهد والسيارة وتحليلها.</string>
     <key>NSPhotoLibraryUsageDescription</key><string>اختر صورة أو فيديو من مكتبتك لشرح وتحليل ما يظهر ويسمع فيه.</string>
